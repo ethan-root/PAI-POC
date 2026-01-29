@@ -19,8 +19,8 @@ jobs:
 
       - name: Alibaba Cloud Container Registry (ACR) Login
         run: |
-          echo "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" | docker login \
-            --username ${{ secrets.ALIYUN_ACCESS_KEY_ID }} \
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login \
+            --username ${{ secrets.ACR_USERNAME }} \
             --password-stdin \
             crpi-gse517a1fwz5v90b.cn-hangzhou.personal.cr.aliyuncs.com
 
