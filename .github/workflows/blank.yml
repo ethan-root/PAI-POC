@@ -21,6 +21,7 @@ jobs:
         uses: aliyun/acr-login@v1
         with:
           login-server: ${{ secrets.ACR_REGISTRY }}
+          region-id: cn-hangzhou
           username: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
           password: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
 
@@ -28,7 +29,7 @@ jobs:
         run: |
           # 使用 Commit SHA (前7位) 作为版本号
           SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          IMAGE_TAG=${{ secrets.ACR_REGISTRY }}/test-namespace/my-app:${SHORT_SHA}
+          IMAGE_TAG=${{ secrets.ACR_REGISTRY }}/capgemini-poc/pai-poc:${SHORT_SHA}
           
           echo "正在构建镜像: $IMAGE_TAG"
           docker build -t $IMAGE_TAG .
@@ -58,6 +59,6 @@ jobs:
           
           echo "正在上传代码到: $OSS_PATH"
           # 排除 git 目录，上传当前目录下的所有文件
-          ossutil cp -r . $OSS_PATH --exclude ".git/*" --exclude ".github/*"
+          ossutil cp -r . $OSS_PATH
           
           echo "✅ 代码上传成功"
