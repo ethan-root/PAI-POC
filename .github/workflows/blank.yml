@@ -1,68 +1,63 @@
-name: Aliyun CI/CD Test
+name: Deploy All (ACR & OSS)
 
+# 触发规则：只要推送到 main 分支，无论修改了什么文件，整个流水线都会启动
 on:
-  # 手动触发器：允许你在界面上选择跑哪条路
+  push:
+    branches: [ "main" ]
+  
+  # 保留手动触发按钮，方便测试
   workflow_dispatch:
-    inputs:
-      deploy_target:
-        description: '选择部署目标 (ACR 或 OSS)'
-        required: true
-        default: 'ACR'
-        type: choice
-        options:
-        - ACR
-        - OSS
 
 jobs:
-  # === 任务 A: 构建并推送镜像 (ACR 路线) ===
+  # === 任务 A: 负责 Docker 镜像 ===
+  # 这个任务会和任务 B 同时开始运行
   build-and-push-acr:
-    if: inputs.deploy_target == 'ACR'
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 拉取代码 (Checkout)
+      - name: 1. 拉取代码
         uses: actions/checkout@v3
 
-      - name: 2. 登录阿里云 ACR (Login)
+      - name: 2. 登录阿里云 ACR
         uses: aliyun/acr-login@v1
         with:
           login-server: ${{ secrets.ACR_REGISTRY }}
           username: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
           password: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
 
-      - name: 3. 构建并推送镜像 (Build & Push)
+      - name: 3. 构建并推送镜像
         run: |
-          # 定义镜像标签 (使用时间戳作为版本号)
-          IMAGE_TAG=${{ secrets.ACR_REGISTRY }}/test-namespace/my-app:${{ github.run_id }}
+          # 使用 Commit SHA (前7位) 作为版本号
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE_TAG=${{ secrets.ACR_REGISTRY }}/test-namespace/my-app:${SHORT_SHA}
           
-          # 构建
+          echo "正在构建镜像: $IMAGE_TAG"
           docker build -t $IMAGE_TAG .
-          
-          # 推送
           docker push $IMAGE_TAG
-          
-          echo "镜像已推送: $IMAGE_TAG"
+          echo "✅ 镜像推送成功"
 
-  # === 任务 B: 上传代码 (OSS 路线) ===
+  # === 任务 B: 负责 OSS 代码 ===
+  # 这个任务会和任务 A 同时开始运行
   upload-to-oss:
-    if: inputs.deploy_target == 'OSS'
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 拉取代码 (Checkout)
+      - name: 1. 拉取代码
         uses: actions/checkout@v3
 
-      - name: 2. 安装 ossutil 工具
+      - name: 2. 安装 OSS 工具
         uses: manyuanrong/setup-ossutil@v2.0
         with:
           endpoint: ${{ secrets.OSS_ENDPOINT }}
           access-key-id: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
           access-key-secret: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
 
-      - name: 3. 上传代码至 OSS (Upload)
+      - name: 3. 上传代码
         run: |
-          # 定义 OSS 路径 (使用 run_id 作为版本目录)
-          OSS_PATH=oss://${{ secrets.OSS_BUCKET }}/releases/${{ github.run_id }}/
+          # 使用 Commit SHA (前7位) 作为版本目录
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          OSS_PATH=oss://${{ secrets.OSS_BUCKET }}/releases/${SHORT_SHA}/
           
-          # 上传 main.py
-          ossutil cp main.py $OSS_PATH
+          echo "正在上传代码到: $OSS_PATH"
+          # 排除 git 目录，上传当前目录下的所有文件
+          ossutil cp -r . $OSS_PATH --exclude ".git/*" --exclude ".github/*"
           
-          echo "代码已上传至: $OSS_PATH"
+          echo "✅ 代码上传成功"
