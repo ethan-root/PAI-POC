@@ -1,0 +1,1 @@
+print("Hello, Aliyun PAI! This is version 1.0")
