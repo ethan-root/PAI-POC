@@ -1,63 +1,90 @@
-name: Deploy All (ACR & OSS)
+name: Deploy Pipeline with Security Gate
 
-# 触发规则：只要推送到 main 分支，无论修改了什么文件，整个流水线都会启动
 on:
   push:
     branches: [ "main" ]
-  
-  # 保留手动触发按钮，方便测试
   workflow_dispatch:
 
+env:
+  # 全局变量配置
+  REGION_ID: cn-hangzhou
+  REGISTRY: crpi-gse517a1fwz5v90b.cn-hangzhou.personal.cr.aliyuncs.com
+  NAMESPACE: capgemini-poc
+  IMAGE_NAME: pai-poc
+  OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+  OSS_ENDPOINT: oss-cn-hangzhou.aliyuncs.com
+
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
-  # === 任务 A: 负责 Docker 镜像 ===
-  # 这个任务会和任务 B 同时开始运行
-  build-and-push-acr:
+  # =========================================================
+  # 任务 1: 代码安全扫描 (门禁)
+  # =========================================================
+  analyze-security:
+    name: 🛡️ Security Gate (CodeQL)
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 拉取代码
-        uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Alibaba Cloud Container Registry (ACR) Login
-        run: |
-          echo "${{ secrets.ACR_PASSWORD }}" | docker login \
-            --username ${{ secrets.ACR_USERNAME }} \
-            --password-stdin \
-            crpi-gse517a1fwz5v90b.cn-hangzhou.personal.cr.aliyuncs.com
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: 'python'
 
-      - name: 3. 构建并推送镜像
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # =========================================================
+  # 任务 2: 构建并推送 Docker 镜像
+  # 关键点: 增加了 needs 依赖
+  # =========================================================
+  build-and-push-acr:
+    needs: analyze-security  # ⛔️ 只有当扫描通过，才会执行这一步
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          password: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+
+      - name: Build and Push
         run: |
-          # 使用 Commit SHA (前7位) 作为版本号
-          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          IMAGE_TAG=crpi-gse517a1fwz5v90b.cn-hangzhou.personal.cr.aliyuncs.com/capgemini-poc/pai-poc:${SHORT_SHA}
-          
-          echo "正在构建镜像: $IMAGE_TAG"
-          docker build -t $IMAGE_TAG .
-          docker push $IMAGE_TAG
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker build -t "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
           echo "✅ 镜像推送成功"
 
-  # === 任务 B: 负责 OSS 代码 ===
-  # 这个任务会和任务 A 同时开始运行
+  # =========================================================
+  # 任务 3: 上传代码到 OSS
+  # 关键点: 增加了 needs 依赖
+  # =========================================================
   upload-to-oss:
+    needs: analyze-security  # ⛔️ 只有当扫描通过，才会执行这一步
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 拉取代码
-        uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: 2. 安装 OSS 工具
+      - name: Setup OSS Tool
         uses: manyuanrong/setup-ossutil@v2.0
         with:
-          endpoint: ${{ secrets.OSS_ENDPOINT }}
-          access-key-id: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-          access-key-secret: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          endpoint: "${{ env.OSS_ENDPOINT }}"
+          access-key-id: "${{ secrets.ALIYUN_ACCESS_KEY_ID }}"
+          access-key-secret: "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }} "
 
-      - name: 3. 上传代码
+      - name: Upload Code
         run: |
-          # 使用 Commit SHA (前7位) 作为版本目录
-          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          OSS_PATH=oss://${{ secrets.OSS_BUCKET }}/releases/${SHORT_SHA}/
-          
-          echo "正在上传代码到: $OSS_PATH"
-          # 排除 git 目录，上传当前目录下的所有文件
-          ossutil cp -r . $OSS_PATH
-          
+          OSS_PATH="oss://${{ env.OSS_BUCKET }}/releases/${{ github.sha }}/"
+          ossutil cp -r . "$OSS_PATH"
           echo "✅ 代码上传成功"
