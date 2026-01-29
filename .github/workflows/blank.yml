@@ -17,13 +17,13 @@ jobs:
       - name: 1. 拉取代码
         uses: actions/checkout@v3
 
-      - name: 2. 登录阿里云 ACR
-        uses: aliyun/acr-login@v1
+      - name: Alibaba Cloud Container Registry (ACR) Login
+        uses: aliyun/acr-login@v2.0.2  # 升级到了 v2
         with:
           login-server: ${{ secrets.ACR_REGISTRY }}
           region-id: cn-hangzhou
-          username: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-          password: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          access-key-id: "${{ secrets.ALIYUN_ACCESS_KEY_ID }}"
+          access-key-secret: "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
 
       - name: 3. 构建并推送镜像
         run: |
