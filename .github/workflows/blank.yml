@@ -20,8 +20,8 @@ jobs:
       - name: Alibaba Cloud Container Registry (ACR) Login
         uses: aliyun/acr-login@v2.0.2
         with:
-          access-key-id: ${{ secrets.ALIYUN_AK_ID }}
-          access-key-secret: ${{ secrets.ALIYUN_AK_SECRET }}
+          access-key-id: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          access-key-secret: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
           region-id: cn-hangzhou
           login-server: crpi-gse517a1fwz5v90b.cn-hangzhou.personal.cr.aliyuncs.com
 
