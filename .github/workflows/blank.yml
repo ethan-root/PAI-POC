@@ -1,18 +1,21 @@
-name: Deploy Pipeline with Security Gate
+name: Deploy Pipeline (ACR & OSS)
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
+# 🔴 全局配置
 env:
-  # 全局变量配置
-  REGION_ID: cn-hangzhou
-  REGISTRY: crpi-gse517a1fwz5v90b.cn-hangzhou.personal.cr.aliyuncs.com
+  # 您的 ACR 镜像地址 (杭州)
+  REGISTRY: ${{ secrets.ACR_REGISTRY }}
   NAMESPACE: capgemini-poc
   IMAGE_NAME: pai-poc
+  
+  # 🔴 关键修复 1: OSS 必须指向上海 (根据之前的报错修正)
+  # 如果您的 secrets.OSS_ENDPOINT 里存的是杭州，请务必在这里硬编码覆盖它，或者去 Secrets 里改成上海
+  OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
   OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-  OSS_ENDPOINT: oss-cn-hangzhou.aliyuncs.com
 
 permissions:
   contents: read
@@ -20,43 +23,36 @@ permissions:
 
 jobs:
   # =========================================================
-  # 任务 1: 代码安全扫描 (门禁)
+  # 任务 1: 安全扫描 (CodeQL)
   # =========================================================
   analyze-security:
-    name: 🛡️ Security Gate (CodeQL)
+    name: 🛡️ Security Gate
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
         with:
           languages: 'python'
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform Analysis
-        uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
 
   # =========================================================
   # 任务 2: 构建并推送 Docker 镜像
-  # 关键点: 增加了 needs 依赖
+  # 🔴 关键修复 2: 使用 ACR 专用账号密码
   # =========================================================
   build-and-push-acr:
-    needs: analyze-security  # ⛔️ 只有当扫描通过，才会执行这一步
+    needs: analyze-security
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Login to ACR
+      - name: Login to ACR (使用固定密码)
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-          password: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          # 这里改用您新加的 ACR 专用变量
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build and Push
         run: |
@@ -67,21 +63,22 @@ jobs:
 
   # =========================================================
   # 任务 3: 上传代码到 OSS
-  # 关键点: 增加了 needs 依赖
+  # 使用 AK/SK (保持不变)
   # =========================================================
   upload-to-oss:
-    needs: analyze-security  # ⛔️ 只有当扫描通过，才会执行这一步
+    needs: analyze-security
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup OSS Tool
         uses: manyuanrong/setup-ossutil@v2.0
         with:
+          # 确保这里使用的是上面 env 定义的上海 Endpoint
           endpoint: "${{ env.OSS_ENDPOINT }}"
+          # 这里继续用 AK/SK，因为 ossutil 需要这个
           access-key-id: "${{ secrets.ALIYUN_ACCESS_KEY_ID }}"
-          access-key-secret: "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }} "
+          access-key-secret: "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
 
       - name: Upload Code
         run: |
