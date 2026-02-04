@@ -309,34 +309,65 @@ jobs:
         run: |
           echo "🚀 更新 PAI-EAS 服务: ${SERVICE_NAME}"
           
-          # 读取服务配置
-          IMAGE_URI=$(jq -r '.containers[0].image' update_payload.json)
+          # 读取新镜像配置
+          NEW_IMAGE=$(jq -r '.containers[0].image' update_payload.json)
           DOCKER_AUTH=$(jq -r '.dockerAuth' update_payload.json)
           
-          echo "📦 新镜像: ${IMAGE_URI}"
+          echo "📦 新镜像: ${NEW_IMAGE}"
           
-          # 尝试使用 aliyun CLI 调用 PAI-EAS API
-          echo "📡 调用 PAI-EAS UpdateService API..."
+          # 步骤 1: 获取当前服务配置
+          echo "📡 获取当前服务配置..."
+          CURRENT_CONFIG=$(aliyun eas DescribeService \
+            --region cn-hangzhou \
+            --ServiceName "${SERVICE_NAME}" 2>&1)
           
-          # 注意：不传 ClusterId，只传 ServiceName 和 region
-          API_RESULT=$(aliyun eas UpdateService \
+          if echo "$CURRENT_CONFIG" | grep -q "ERROR"; then
+            echo "❌ 无法获取服务配置"
+            echo "$CURRENT_CONFIG"
+            echo ""
+            echo "ℹ️  可能的原因:"
+            echo "   1. 服务名称不正确: ${SERVICE_NAME}"
+            echo "   2. 账号无权限访问该服务"
+            echo "   3. 服务不在 cn-hangzhou 区域"
+            exit 1
+          fi
+          
+          echo "✅ 当前配置获取成功"
+          
+          # 步骤 2: 修改镜像地址
+          echo "� 更新镜像地址..."
+          
+          # 从当前配置中提取并更新 image 字段
+          UPDATED_CONFIG=$(echo "$CURRENT_CONFIG" | jq \
+            --arg new_image "$NEW_IMAGE" \
+            --arg docker_auth "$DOCKER_AUTH" \
+            '.containers[0].image = $new_image | .dockerAuth = $docker_auth')
+          
+          echo "$UPDATED_CONFIG" > updated_service.json
+          
+          echo "📄 更新后的配置:"
+          cat updated_service.json | jq '.containers[0].image'
+          
+          # 步骤 3: 调用 UpdateService API
+          echo "📡 提交服务更新..."
+          
+          UPDATE_RESULT=$(aliyun eas UpdateService \
             --region cn-hangzhou \
             --ServiceName "${SERVICE_NAME}" \
-            --body "$(cat update_payload.json)" 2>&1) || API_STATUS=$?
+            --body "$(cat updated_service.json)" 2>&1) || UPDATE_STATUS=$?
           
-          if [ -z "$API_STATUS" ]; then
-            echo "✅ API 调用成功"
-            echo "$API_RESULT"
+          if [ -z "$UPDATE_STATUS" ]; then
+            echo "✅ 服务更新成功"
+            echo "$UPDATE_RESULT"
           else
-            echo "⚠️  标准 API 调用失败 (退出码: ${API_STATUS:-unknown})"
-            echo "📄 错误信息: $API_RESULT"
+            echo "⚠️  API 更新失败 (退出码: ${UPDATE_STATUS:-unknown})"
+            echo "📄 错误详情:"
+            echo "$UPDATE_RESULT"
             echo ""
-            echo "ℹ️  PAI-EAS UpdateService API 可能需要不同的参数或权限"
-            echo "ℹ️  建议："
-            echo "   1. 确认服务名称: ${SERVICE_NAME}"
-            echo "   2. 确认镜像地址: ${IMAGE_URI}"
-            echo "   3. 在 PAI-EAS 控制台手动更新，或"
-            echo "   4. 联系阿里云技术支持确认 API 调用方式"
+            echo "ℹ️  建议操作:"
+            echo "   • 登录 PAI-EAS 控制台手动更新镜像"
+            echo "   • 服务名: ${SERVICE_NAME}"
+            echo "   • 新镜像: ${NEW_IMAGE}"
           fi
           
           echo ""
