@@ -259,6 +259,8 @@ jobs:
           aliyun plugin install pai --force
           echo "✅ PAI 插件安装完成"
           
+      - name: Verify PAI EAS Permissions
+        run: |
           echo "🔍 验证 PAI EAS 权限..."
           if aliyun pai ListServices --region cn-hangzhou --PageSize 1 > /dev/null 2>&1; then
             echo "✅ CLI 权限验证通过"
