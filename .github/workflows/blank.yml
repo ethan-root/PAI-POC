@@ -232,11 +232,90 @@ jobs:
           fi
 
   # =========================================================
-  # 任务 4: 部署状态汇总
+  # 任务 4: 更新 PAI EAS 服务
+  # =========================================================
+  update-pai-service:
+    name: 🚀 Update PAI EAS Service
+    needs: [prepare, build-and-push-acr]
+    runs-on: ubuntu-latest
+    if: needs.build-and-push-acr.result == 'success'
+    steps:
+      - name: Download eascmd64
+        run: |
+          wget -q https://eas-data.oss-cn-shanghai.aliyuncs.com/tools/eascmd64
+          chmod +x eascmd64
+          echo "✅ eascmd64 下载完成"
+
+      - name: Configure eascmd64
+        env:
+          ALIYUN_AK: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_SK: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+        run: |
+          ./eascmd64 config \
+            -i "${ALIYUN_AK}" \
+            -k "${ALIYUN_SK}" \
+            -e "pai-eas.cn-hangzhou.aliyuncs.com"
+          echo "✅ eascmd64 认证配置完成"
+
+      - name: Prepare Update Config
+        env:
+          # 使用 VPC 内网地址，PAI 通过内网拉取镜像
+          ACR_REGISTRY_VPC: crpi-gse517a1fwz5v90b-vpc.cn-hangzhou.personal.cr.aliyuncs.com
+          NAMESPACE: capgemini-poc
+          IMAGE_NAME: pai-poc
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          # 构建 VPC 内网镜像地址（PAI 拉取用）
+          IMAGE_URI="${ACR_REGISTRY_VPC}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
+          
+          # 生成 dockerAuth (Base64 编码)
+          DOCKER_AUTH=$(echo -n "${ACR_USERNAME}:${ACR_PASSWORD}" | base64 -w 0)
+          
+          # 创建更新配置文件（保持与现有配置一致）
+          cat > update_service.json << EOF
+          {
+            "containers": [
+              {
+                "image": "${IMAGE_URI}",
+                "port": 8000,
+                "script": "python app.py"
+              }
+            ],
+            "dockerAuth": "${DOCKER_AUTH}"
+          }
+          EOF
+          
+          echo "📄 更新配置:"
+          cat update_service.json
+
+      - name: Update PAI EAS Service
+        run: |
+          echo "🚀 开始更新 PAI EAS 服务: pai_poc"
+          
+          ./eascmd64 modify pai_poc -s update_service.json
+          
+          echo "✅ PAI EAS 服务更新命令已执行"
+
+      - name: Wait and Verify Service Status
+        run: |
+          echo "⏳ 等待服务更新 (30秒)..."
+          sleep 30
+          
+          echo "🔍 检查服务状态:"
+          ./eascmd64 desc pai_poc
+          
+          echo ""
+          echo "📊 服务版本信息:"
+          ./eascmd64 desc pai_poc | grep -E "(image|version|status)" || true
+
+  # =========================================================
+  # 任务 5: 部署状态汇总
   # =========================================================
   deployment-summary:
     name: 📊 Deployment Summary
-    needs: [prepare, build-and-push-acr, upload-to-oss]
+    needs: [prepare, build-and-push-acr, upload-to-oss, update-pai-service]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -275,13 +354,22 @@ jobs:
             echo "| ☁️ OSS 代码包 | \`releases/${VERSION}/\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
           fi
           
+          # PAI EAS 状态
+          if [ "${{ needs.update-pai-service.result }}" == "success" ]; then
+            echo "| 🤖 PAI EAS 服务 | \`pai_poc\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🤖 PAI EAS 服务 | \`pai_poc\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 下一步操作" >> $GITHUB_STEP_SUMMARY
-          echo "- PAI EAS 服务需要手动更新或通过后续流水线自动更新" >> $GITHUB_STEP_SUMMARY
           echo "- DataWorks 可通过读取 \`releases/latest.txt\` 获取最新版本" >> $GITHUB_STEP_SUMMARY
 
       - name: Check Overall Status
-        if: needs.build-and-push-acr.result != 'success' || needs.upload-to-oss.result != 'success'
+        if: |
+          needs.build-and-push-acr.result != 'success' || 
+          needs.upload-to-oss.result != 'success' ||
+          needs.update-pai-service.result != 'success'
         run: |
           echo "❌ 部署存在失败项，请检查日志"
           exit 1
