@@ -23,4 +23,9 @@ EXPOSE 8000
 
 # 运行命令
 # 加上 -u 参数 (unbuffered) 是双重保险，确保日志实时输出
-CMD ["python", "-u", "main.py"]
+# ❌ 暂时注释掉原来的启动命令
+# CMD ["python", "-u", "main.py"]
+
+# ✅ 换成这个“休眠命令”
+# 让容器先睡 1 个小时，这样它绝对不会 crash，PAI 状态会变成 Running
+CMD ["sleep", "3600"]
