@@ -256,7 +256,7 @@ jobs:
       - name: Install PAI Plugin
         run: |
           echo "🔌 安装 PAI CLI 插件..."
-          aliyun plugin install pai --force
+          aliyun plugin install pai --version 2023-06-01 --force
           echo "✅ PAI 插件安装完成"
           
       - name: Verify PAI EAS Permissions
