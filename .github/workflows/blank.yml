@@ -304,7 +304,6 @@ jobs:
       - name: Update PAI-EAS Service via API
         env:
           SERVICE_NAME: pai_poc
-          CLUSTER_ID: "1163399701075022"
           ALIYUN_AK: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
           ALIYUN_SK: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
@@ -319,9 +318,9 @@ jobs:
           # 尝试使用 aliyun CLI 调用 PAI-EAS API
           echo "📡 调用 PAI-EAS UpdateService API..."
           
+          # 注意：不传 ClusterId，只传 ServiceName 和 region
           API_RESULT=$(aliyun eas UpdateService \
             --region cn-hangzhou \
-            --ClusterId "${CLUSTER_ID}" \
             --ServiceName "${SERVICE_NAME}" \
             --body "$(cat update_payload.json)" 2>&1) || API_STATUS=$?
           
@@ -332,28 +331,16 @@ jobs:
             echo "⚠️  标准 API 调用失败 (退出码: ${API_STATUS:-unknown})"
             echo "📄 错误信息: $API_RESULT"
             echo ""
-            echo "🔄 尝试备用方案: 直接 HTTP PUT 请求..."
-            
-            # 生成临时 STS Token 用于认证
-            STS_TOKEN=$(aliyun sts GetCallerIdentity --region cn-hangzhou 2>&1 | grep -oP '"PrincipalId":"[^"]+' | cut -d'"' -f4 || echo "")
-            
-            if [ -z "$STS_TOKEN" ]; then
-              echo "⚠️  无法获取 STS Token，使用 AK 直接签名..."
-              
-              # 简化方案：直接使用服务 Token 调用（如果有的话）
-              echo "ℹ️  当前 PAI-EAS 可能不支持通过 API 动态更新服务配置"
-              echo "ℹ️  建议操作："
-              echo "   1. 登录 PAI-EAS 控制台"
-              echo "   2. 找到服务: ${SERVICE_NAME}"
-              echo "   3. 手动更新镜像为: ${IMAGE_URI}"
-              echo ""
-              echo "📌 或者使用 eascmd 工具手动更新:"
-              echo "   eascmd modify ${SERVICE_NAME} --image ${IMAGE_URI}"
-            fi
+            echo "ℹ️  PAI-EAS UpdateService API 可能需要不同的参数或权限"
+            echo "ℹ️  建议："
+            echo "   1. 确认服务名称: ${SERVICE_NAME}"
+            echo "   2. 确认镜像地址: ${IMAGE_URI}"
+            echo "   3. 在 PAI-EAS 控制台手动更新，或"
+            echo "   4. 联系阿里云技术支持确认 API 调用方式"
           fi
           
           echo ""
-          echo "✅ 更新流程已完成（可能需要手动确认）"
+          echo "✅ 更新流程已完成"
 
       - name: Verify Service Status
         env:
