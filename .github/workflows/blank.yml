@@ -1,11 +1,8 @@
 name: Deploy Pipeline (ACR & OSS)
 
 on:
-  # 🔴 改为 Release 触发 - 使用 Tag 作为版本号
   release:
     types: [published]
-  
-  # 保留手动触发（用于测试）
   workflow_dispatch:
     inputs:
       version_tag:
@@ -13,14 +10,10 @@ on:
         required: true
         default: 'v0.0.0-test'
 
-# 🔴 全局配置
 env:
-  # ACR 配置 (杭州)
   REGISTRY: ${{ secrets.ACR_REGISTRY }}
   NAMESPACE: capgemini-poc
   IMAGE_NAME: pai-poc
-  
-  # OSS 配置 (上海)
   OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
   OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
 
@@ -29,20 +22,15 @@ permissions:
   security-events: write
 
 jobs:
-  # =========================================================
-  # 任务 0: 版本号解析
-  # =========================================================
   prepare:
     name: 📋 Prepare Version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.tag }}
-      # 移除 image_uri 输出，因为它包含 secret 会被 GitHub 跳过
     steps:
       - name: Extract Version Tag
         id: version
         run: |
-          # 根据不同触发方式获取版本号
           if [ "${{ github.event_name }}" == "release" ]; then
             VERSION="${{ github.event.release.tag_name }}"
           elif [ "${{ github.event_name }}" == "push" ]; then
@@ -60,23 +48,17 @@ jobs:
           echo "tag=${VERSION}" >> $GITHUB_OUTPUT
           echo "📦 版本号: ${VERSION}"
 
-  # =========================================================
-  # 任务 1: 安全扫描 (CodeQL)
-  # =========================================================
   analyze-security:
     name: 🛡️ Security Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: 'python'
-      - uses: github/codeql-action/autobuild@v3
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/autobuild@v4
+      - uses: github/codeql-action/analyze@v4
 
-  # =========================================================
-  # 任务 2: 构建并推送 Docker 镜像
-  # =========================================================
   build-and-push-acr:
     name: 🐳 Build & Push to ACR
     needs: [prepare, analyze-security]
@@ -99,13 +81,10 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
-          
           echo "🔨 构建镜像: ${IMAGE_URI}"
           docker build -t "${IMAGE_URI}" .
-          
           echo "📤 推送镜像..."
           docker push "${IMAGE_URI}"
-          
           echo "✅ 镜像推送成功: ${IMAGE_URI}"
 
       - name: Verify Image Push
@@ -116,18 +95,14 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
-          
           echo "🔍 验证镜像推送状态..."
           if docker manifest inspect "${IMAGE_URI}" > /dev/null 2>&1; then
             echo "✅ 镜像验证成功: ${IMAGE_URI}"
           else
-            echo "❌ 镜像验证失败，可能推送未完成"
+            echo "❌ 镜像验证失败"
             exit 1
           fi
 
-  # =========================================================
-  # 任务 3: 上传代码到 OSS (优化版)
-  # =========================================================
   upload-to-oss:
     name: ☁️ Upload to OSS
     needs: [prepare, analyze-security]
@@ -142,7 +117,6 @@ jobs:
           access-key-id: "${{ secrets.ALIYUN_ACCESS_KEY_ID }}"
           access-key-secret: "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
 
-      # 🆕 优化: 只上传必要文件
       - name: Prepare Upload Files
         env:
           REGISTRY: ${{ secrets.ACR_REGISTRY }}
@@ -151,11 +125,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
-          
-          echo "📁 准备上传文件..."
-          
           mkdir -p .upload_staging
-          
           cp -r main.py .upload_staging/ 2>/dev/null || true
           cp -r Dockerfile .upload_staging/ 2>/dev/null || true
           cp -r requirements.txt .upload_staging/ 2>/dev/null || true
@@ -180,15 +150,10 @@ jobs:
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           OSS_PATH="oss://${{ env.OSS_BUCKET }}/releases/${VERSION}/"
-          
           echo "📤 上传到: ${OSS_PATH}"
-          
-          # 上传文件
           ossutil cp -r .upload_staging/ "${OSS_PATH}" --include "*"
-          
           echo "✅ 代码上传成功"
 
-      # 🆕 更新 latest 指针文件
       - name: Update Latest Pointer
         env:
           REGISTRY: ${{ secrets.ACR_REGISTRY }}
@@ -197,7 +162,6 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
-          
           echo "${VERSION}" > latest.txt
           ossutil cp latest.txt "oss://${{ env.OSS_BUCKET }}/releases/latest.txt" -f
           
@@ -210,20 +174,14 @@ jobs:
           }
           EOF
           ossutil cp latest.json "oss://${{ env.OSS_BUCKET }}/releases/latest.json" -f
-          
           echo "✅ Latest 指针更新完成"
 
-      # 🆕 部署状态检查 - 验证 OSS 上传
       - name: Verify OSS Upload
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          
           echo "🔍 验证 OSS 上传状态..."
-          
-          # 列出上传的文件
           ossutil ls "oss://${{ env.OSS_BUCKET }}/releases/${VERSION}/" --limited-num 20
           
-          # 检查 manifest.json 是否存在
           if ossutil stat "oss://${{ env.OSS_BUCKET }}/releases/${VERSION}/manifest.json" > /dev/null 2>&1; then
             echo "✅ OSS 上传验证成功"
           else
@@ -249,13 +207,9 @@ jobs:
           ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
         run: |
-          # 构建 VPC 内网镜像地址（PAI EAS 从内网拉取）
           IMAGE_URI="${ACR_REGISTRY_VPC}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
-          
-          # 生成 dockerAuth (Base64 编码的 username:password)
           DOCKER_AUTH=$(echo -n "${ACR_USERNAME}:${ACR_PASSWORD}" | base64 -w 0)
           
-          # 创建服务更新配置 (JSON)
           cat > update_payload.json << EOF
           {
             "metadata": {
@@ -274,8 +228,6 @@ jobs:
           
           echo "📄 服务更新配置:"
           cat update_payload.json
-          
-          # 导出环境变量供后续步骤使用
           echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
 
       - name: Install Aliyun CLI
@@ -292,7 +244,7 @@ jobs:
           ALIYUN_AK: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
           ALIYUN_SK: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
-          echo "� 配置 Aliyun CLI 认证..."
+          echo "🔑 配置 Aliyun CLI 认证..."
           aliyun configure set \
             --profile default \
             --mode AK \
@@ -300,6 +252,14 @@ jobs:
             --access-key-id "${ALIYUN_AK}" \
             --access-key-secret "${ALIYUN_SK}"
           echo "✅ 认证配置完成"
+          
+          echo "🔍 验证 PAI EAS 权限..."
+          if aliyun pai ListServices --region cn-hangzhou --PageSize 1 > /dev/null 2>&1; then
+            echo "✅ CLI 权限验证通过"
+          else
+            echo "❌ CLI 权限验证失败！请检查 RAM 用户是否授权 AliyunPAIEASFullAccess"
+            exit 1
+          fi
 
       - name: Update PAI-EAS Service via API
         env:
@@ -309,88 +269,52 @@ jobs:
         run: |
           echo "🚀 更新 PAI-EAS 服务: ${SERVICE_NAME}"
           
-          # 读取新镜像配置
           NEW_IMAGE=$(jq -r '.containers[0].image' update_payload.json)
           DOCKER_AUTH=$(jq -r '.dockerAuth' update_payload.json)
-          
           echo "📦 新镜像: ${NEW_IMAGE}"
           
-          # 步骤 1: 获取当前服务配置
           echo "📡 获取当前服务配置..."
-          CURRENT_CONFIG=$(aliyun eas DescribeService \
+          CURRENT_CONFIG=$(aliyun pai DescribeService \
             --region cn-hangzhou \
-            --ServiceName "${SERVICE_NAME}" 2>&1)
-          
-          if echo "$CURRENT_CONFIG" | grep -q "ERROR"; then
-            echo "⚠️  无法通过 API 获取服务配置"
-            echo "$CURRENT_CONFIG"
-            echo ""
-            echo "⚠️  可能的原因:"
-            echo "   • 服务名称: ${SERVICE_NAME} (请确认)"
-            echo "   • 区域: cn-hangzhou (请确认)"
-            echo "   • 权限: 确认 AK 有 eas:DescribeService"
-            echo ""
-            echo "📌 镜像已构建，请手动更新:"
-            echo "   控制台: https://pai.console.aliyun.com/"
-            echo "   服务名: ${SERVICE_NAME}"
-            echo "   新镜像: ${NEW_IMAGE}"
-            echo ""
-            echo "✅ 工作流继续（需手动部署）"
-            exit 0
-          fi
+            --ServiceName "${SERVICE_NAME}" 2>&1) || { 
+              echo "❌ DescribeService 失败: $CURRENT_CONFIG"; 
+              exit 1; 
+            }
           
           echo "✅ 当前配置获取成功"
           
-          # 步骤 2: 修改镜像地址
-          echo "� 更新镜像地址..."
-          
-          # 从当前配置中提取并更新 image 字段
           UPDATED_CONFIG=$(echo "$CURRENT_CONFIG" | jq \
             --arg new_image "$NEW_IMAGE" \
             --arg docker_auth "$DOCKER_AUTH" \
             '.containers[0].image = $new_image | .dockerAuth = $docker_auth')
           
           echo "$UPDATED_CONFIG" > updated_service.json
-          
           echo "📄 更新后的配置:"
           cat updated_service.json | jq '.containers[0].image'
           
           # 步骤 3: 调用 UpdateService API
           echo "📡 提交服务更新..."
           
-          UPDATE_RESULT=$(aliyun eas UpdateService \
+          UPDATE_RESULT=$(aliyun pai UpdateService \
             --region cn-hangzhou \
             --ServiceName "${SERVICE_NAME}" \
-            --body "$(cat updated_service.json)" 2>&1) || UPDATE_STATUS=$?
+            --body "$(cat updated_service.json)" 2>&1) || { 
+              echo "❌ UpdateService 失败: $UPDATE_RESULT"; 
+              exit 1; 
+            }
           
-          if [ -z "$UPDATE_STATUS" ]; then
-            echo "✅ 服务更新成功"
-            echo "$UPDATE_RESULT"
-          else
-            echo "⚠️  API 更新失败 (退出码: ${UPDATE_STATUS:-unknown})"
-            echo "📄 错误详情:"
-            echo "$UPDATE_RESULT"
-            echo ""
-            echo "ℹ️  建议操作:"
-            echo "   • 登录 PAI-EAS 控制台手动更新镜像"
-            echo "   • 服务名: ${SERVICE_NAME}"
-            echo "   • 新镜像: ${NEW_IMAGE}"
-          fi
-          
-          echo ""
-          echo "✅ 更新流程已完成"
+          echo "✅ 服务更新成功"
+          echo "$UPDATE_RESULT"
 
       - name: Verify Service Status
         env:
           SERVICE_URL: http://1163399701075022.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/pai_poc
           EAS_TOKEN: ${{ secrets.PAI_EAS_TOKEN }}
         run: |
-          echo "⏳ 等待服务更新生效 (30秒)..."
-          sleep 30
+          echo "⏳ 等待服务更新生效 (45秒)..."
+          sleep 45
           
           echo "🔍 验证服务健康状态..."
-          
-          # 发送测试请求验证服务
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             -X POST "${SERVICE_URL}" \
             -H "Authorization: ${EAS_TOKEN}" \
@@ -401,17 +325,14 @@ jobs:
           BODY=$(echo "$RESPONSE" | head -n-1)
           
           echo "📊 HTTP 状态码: ${HTTP_CODE}"
-          echo "📄 响应内容: ${BODY}"
+          echo "📄 响应内容: ${BODY:0:200}"
           
           if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
             echo "✅ 服务验证成功，当前镜像: ${IMAGE_URI}"
           else
-            echo "⚠️  服务响应异常，但可能正在启动中"
+            echo "⚠️ 服务响应异常 (HTTP ${HTTP_CODE})，可能正在启动中"
           fi
 
-  # =========================================================
-  # 任务 5: 部署状态汇总
-  # =========================================================
   deployment-summary:
     name: 📊 Deployment Summary
     needs: [prepare, build-and-push-acr, upload-to-oss, update-pai-service]
@@ -427,42 +348,33 @@ jobs:
         run: |
           IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
-          echo "# 🚀 部署状态汇总" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 版本信息" >> $GITHUB_STEP_SUMMARY
-          echo "| 项目 | 值 |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
-          echo "| **版本号** | \`${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit SHA** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **触发方式** | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # 🚀 部署状态汇总
           
-          echo "## 部署产物" >> $GITHUB_STEP_SUMMARY
-          echo "| 产物 | 地址 | 状态 |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|------|------|" >> $GITHUB_STEP_SUMMARY
+          ## 版本信息
+          | 项目 | 值 |
+          |------|-----|
+          | **版本号** | \`${VERSION}\` |
+          | **Commit SHA** | \`${{ github.sha }}\` |
+          | **触发方式** | ${{ github.event_name }} |
           
-          if [ "${{ needs.build-and-push-acr.result }}" == "success" ]; then
-            echo "| 🐳 Docker 镜像 | \`${IMAGE_URI}\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| 🐳 Docker 镜像 | \`${IMAGE_URI}\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
-          fi
+          ## 部署产物
+          | 产物 | 地址 | 状态 |
+          |------|------|------|
+          | 🐳 Docker 镜像 | \`${IMAGE_URI}\` | ${{ needs.build-and-push-acr.result == 'success' && '✅ 成功' || '❌ 失败' }} |
+          | ☁️ OSS 代码包 | \`releases/${VERSION}/\` | ${{ needs.upload-to-oss.result == 'success' && '✅ 成功' || '❌ 失败' }} |
+          | 🤖 PAI EAS 服务 | \`pai_poc\` | ${{ needs.update-pai-service.result == 'success' && '✅ 成功' || '❌ 失败' }} |
           
-          if [ "${{ needs.upload-to-oss.result }}" == "success" ]; then
-            echo "| ☁️ OSS 代码包 | \`releases/${VERSION}/\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| ☁️ OSS 代码包 | \`releases/${VERSION}/\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
-          fi
+          ## 关键修复说明
+          - ✅ CLI 命令前缀修正: \`aliyun eas\` → \`aliyun pai\` (符合阿里云官方规范)
+          - ✅ API 失败强制退出: 所有 PAI API 调用失败时立即终止任务
+          - ✅ 权限验证步骤: 新增 ListServices 权限预检，提前暴露权限问题
+          - ✅ VPC 地址保留: personal.cr.aliyuncs.com 格式与实际服务配置完全一致
           
-          # PAI EAS 状态
-          if [ "${{ needs.update-pai-service.result }}" == "success" ]; then
-            echo "| 🤖 PAI EAS 服务 | \`pai_poc\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| 🤖 PAI EAS 服务 | \`pai_poc\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 下一步操作" >> $GITHUB_STEP_SUMMARY
-          echo "- DataWorks 可通过读取 \`releases/latest.txt\` 获取最新版本" >> $GITHUB_STEP_SUMMARY
+          ## 下一步操作
+          - DataWorks 可通过读取 \`releases/latest.txt\` 获取最新版本
+          - 服务监控: PAI EAS 控制台
+          EOF
 
       - name: Check Overall Status
         if: |
