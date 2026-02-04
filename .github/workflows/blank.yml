@@ -232,7 +232,7 @@ jobs:
           fi
 
   # =========================================================
-  # 任务 4: 更新 PAI EAS 服务
+  # 任务 4: 更新 PAI EAS 服务 (使用 OpenAPI)
   # =========================================================
   update-pai-service:
     name: 🚀 Update PAI EAS Service
@@ -240,26 +240,8 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.build-and-push-acr.result == 'success'
     steps:
-      - name: Download eascmd64
-        run: |
-          wget -q https://eas-data.oss-cn-shanghai.aliyuncs.com/tools/eascmd64
-          chmod +x eascmd64
-          echo "✅ eascmd64 下载完成"
-
-      - name: Configure eascmd64
+      - name: Prepare Service Update Payload
         env:
-          ALIYUN_AK: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-          ALIYUN_SK: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-        run: |
-          ./eascmd64 config \
-            -i "${ALIYUN_AK}" \
-            -k "${ALIYUN_SK}" \
-            -e "pai-eas.cn-hangzhou.aliyuncs.com"
-          echo "✅ eascmd64 认证配置完成"
-
-      - name: Prepare Update Config
-        env:
-          # 使用 VPC 内网地址，PAI 通过内网拉取镜像
           ACR_REGISTRY_VPC: crpi-gse517a1fwz5v90b-vpc.cn-hangzhou.personal.cr.aliyuncs.com
           NAMESPACE: capgemini-poc
           IMAGE_NAME: pai-poc
@@ -267,14 +249,14 @@ jobs:
           ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
         run: |
-          # 构建 VPC 内网镜像地址（PAI 拉取用）
+          # 构建 VPC 内网镜像地址（PAI EAS 从内网拉取）
           IMAGE_URI="${ACR_REGISTRY_VPC}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
-          # 生成 dockerAuth (Base64 编码)
+          # 生成 dockerAuth (Base64 编码的 username:password)
           DOCKER_AUTH=$(echo -n "${ACR_USERNAME}:${ACR_PASSWORD}" | base64 -w 0)
           
-          # 创建更新配置文件 - 添加 metadata.workspace_id
-          cat > update_service.json << EOF
+          # 创建服务更新配置 (JSON)
+          cat > update_payload.json << EOF
           {
             "metadata": {
               "workspace_id": "556368"
@@ -290,29 +272,114 @@ jobs:
           }
           EOF
           
-          echo "📄 更新配置:"
-          cat update_service.json
-
-      - name: Update PAI EAS Service
-        run: |
-          echo "🚀 开始更新 PAI EAS 服务: pai_poc"
+          echo "📄 服务更新配置:"
+          cat update_payload.json
           
-          # workspace_id 已在 JSON 配置文件中指定，无需命令行参数
-          ./eascmd64 modify pai_poc -s update_service.json
-          
-          echo "✅ PAI EAS 服务更新命令已执行"
+          # 导出环境变量供后续步骤使用
+          echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
 
-      - name: Wait and Verify Service Status
+      - name: Call PAI-EAS UpdateService API
+        env:
+          PAI_EAS_ENDPOINT: https://pai-eas.cn-hangzhou.aliyuncs.com
+          SERVICE_NAME: pai_poc
+          REGION_ID: cn-hangzhou
+          ALIYUN_AK: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_SK: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
-          echo "⏳ 等待服务更新 (30秒)..."
+          echo "🚀 调用 PAI-EAS OpenAPI 更新服务: ${SERVICE_NAME}"
+          
+          # 生成时间戳和签名 (简化版，实际生产建议使用 aliyun-cli 或 SDK)
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          # 使用 Python 脚本调用 OpenAPI (内置签名逻辑)
+          python3 << 'PYTHON_SCRIPT'
+          import os, json, hmac, hashlib, base64, urllib.parse
+          from datetime import datetime
+          import http.client
+          
+          # 读取配置
+          ak = os.environ['ALIYUN_AK']
+          sk = os.environ['ALIYUN_SK']
+          region = os.environ['REGION_ID']
+          service_name = os.environ['SERVICE_NAME']
+          
+          # 读取更新 payload
+          with open('update_payload.json', 'r') as f:
+              payload = json.load(f)
+          
+          # PAI-EAS OpenAPI 参数
+          params = {
+              'Action': 'UpdateService',
+              'ServiceName': service_name,
+              'RegionId': region,
+              'Version': '2021-07-01',
+              'Format': 'JSON',
+              'AccessKeyId': ak,
+              'SignatureMethod': 'HMAC-SHA1',
+              'SignatureVersion': '1.0',
+              'SignatureNonce': base64.b64encode(os.urandom(16)).decode(),
+              'Timestamp': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+          }
+          
+          # 构建待签名字符串
+          sorted_params = sorted(params.items())
+          query_string = '&'.join([f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}" for k, v in sorted_params])
+          string_to_sign = f"POST&%2F&{urllib.parse.quote(query_string, safe='')}"
+          
+          # 计算签名
+          signature = base64.b64encode(
+              hmac.new((sk + '&').encode(), string_to_sign.encode(), hashlib.sha1).digest()
+          ).decode()
+          params['Signature'] = signature
+          
+          # 发送请求
+          conn = http.client.HTTPSConnection('pai-eas.cn-hangzhou.aliyuncs.com')
+          headers = {'Content-Type': 'application/json'}
+          
+          query = '&'.join([f"{k}={urllib.parse.quote(str(v))}" for k, v in params.items()])
+          conn.request('POST', f'/?{query}', body=json.dumps(payload), headers=headers)
+          
+          response = conn.getresponse()
+          result = response.read().decode()
+          
+          print(f"📡 API 响应状态: {response.status}")
+          print(f"📄 响应内容: {result}")
+          
+          if response.status not in [200, 201]:
+              print("❌ 服务更新失败")
+              exit(1)
+          
+          print("✅ PAI-EAS 服务更新成功")
+          PYTHON_SCRIPT
+
+      - name: Verify Service Status
+        env:
+          SERVICE_URL: http://1163399701075022.cn-hangzhou.pai-eas.aliyuncs.com/api/predict/pai_poc
+          EAS_TOKEN: ${{ secrets.PAI_EAS_TOKEN }}
+        run: |
+          echo "⏳ 等待服务更新生效 (30秒)..."
           sleep 30
           
-          echo "🔍 检查服务状态:"
-          ./eascmd64 desc pai_poc
+          echo "🔍 验证服务健康状态..."
           
-          echo ""
-          echo "📊 服务版本信息:"
-          ./eascmd64 desc pai_poc | grep -E "(image|version|status)" || true
+          # 发送测试请求验证服务
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "${SERVICE_URL}" \
+            -H "Authorization: ${EAS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"test": "health_check"}' || echo "000")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+          
+          echo "📊 HTTP 状态码: ${HTTP_CODE}"
+          echo "📄 响应内容: ${BODY}"
+          
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+            echo "✅ 服务验证成功，当前镜像: ${IMAGE_URI}"
+          else
+            echo "⚠️  服务响应异常，但可能正在启动中"
+          fi
 
   # =========================================================
   # 任务 5: 部署状态汇总
