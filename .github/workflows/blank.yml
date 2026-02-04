@@ -238,11 +238,6 @@ jobs:
           sudo mv aliyun /usr/local/bin/
           aliyun version
           echo "✅ Aliyun CLI 安装完成"
-      - name: Install PAI Plugin
-        run: |
-          echo "🔌 安装 PAI CLI 插件..."
-          aliyun plugin install pai --force
-          echo "✅ PAI 插件安装完成"
 
       - name: Configure Aliyun CLI
         env:
@@ -257,6 +252,12 @@ jobs:
             --access-key-id "${ALIYUN_AK}" \
             --access-key-secret "${ALIYUN_SK}"
           echo "✅ 认证配置完成"
+      
+      - name: Install PAI Plugin
+        run: |
+          echo "🔌 安装 PAI CLI 插件..."
+          aliyun plugin install pai --force
+          echo "✅ PAI 插件安装完成"
           
           echo "🔍 验证 PAI EAS 权限..."
           if aliyun pai ListServices --region cn-hangzhou --PageSize 1 > /dev/null 2>&1; then
