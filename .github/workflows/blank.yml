@@ -1,19 +1,26 @@
 name: Deploy Pipeline (ACR & OSS)
 
 on:
-  push:
-    branches: [ "main" ]
+  # 🔴 改为 Release 触发 - 使用 Tag 作为版本号
+  release:
+    types: [published]
+  
+  # 保留手动触发（用于测试）
   workflow_dispatch:
+    inputs:
+      version_tag:
+        description: '版本标签 (如: v1.0.0)'
+        required: true
+        default: 'v0.0.0-test'
 
 # 🔴 全局配置
 env:
-  # 您的 ACR 镜像地址 (杭州)
+  # ACR 配置 (杭州)
   REGISTRY: ${{ secrets.ACR_REGISTRY }}
   NAMESPACE: capgemini-poc
   IMAGE_NAME: pai-poc
   
-  # 🔴 关键修复 1: OSS 必须指向上海 (根据之前的报错修正)
-  # 如果您的 secrets.OSS_ENDPOINT 里存的是杭州，请务必在这里硬编码覆盖它，或者去 Secrets 里改成上海
+  # OSS 配置 (上海)
   OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
   OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
 
@@ -22,6 +29,35 @@ permissions:
   security-events: write
 
 jobs:
+  # =========================================================
+  # 任务 0: 版本号解析
+  # =========================================================
+  prepare:
+    name: 📋 Prepare Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.tag }}
+      image_uri: ${{ steps.version.outputs.image_uri }}
+    steps:
+      - name: Extract Version Tag
+        id: version
+        run: |
+          # 优先使用 Release Tag，否则使用手动输入的版本
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ github.event.inputs.version_tag }}"
+          fi
+          
+          # 构建完整镜像地址
+          IMAGE_URI="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION}"
+          
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          
+          echo "📦 版本号: ${VERSION}"
+          echo "🐳 镜像地址: ${IMAGE_URI}"
+
   # =========================================================
   # 任务 1: 安全扫描 (CodeQL)
   # =========================================================
@@ -38,35 +74,54 @@ jobs:
 
   # =========================================================
   # 任务 2: 构建并推送 Docker 镜像
-  # 🔴 关键修复 2: 使用 ACR 专用账号密码
   # =========================================================
   build-and-push-acr:
-    needs: analyze-security
+    name: 🐳 Build & Push to ACR
+    needs: [prepare, analyze-security]
     runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ needs.prepare.outputs.image_uri }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Login to ACR (使用固定密码)
+      - name: Login to ACR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          # 这里改用您新加的 ACR 专用变量
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build and Push
         run: |
-          IMAGE_TAG="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          docker build -t "$IMAGE_TAG" .
-          docker push "$IMAGE_TAG"
-          echo "✅ 镜像推送成功"
+          IMAGE_URI="${{ needs.prepare.outputs.image_uri }}"
+          
+          echo "🔨 构建镜像: ${IMAGE_URI}"
+          docker build -t "${IMAGE_URI}" .
+          
+          echo "📤 推送镜像..."
+          docker push "${IMAGE_URI}"
+          
+          echo "✅ 镜像推送成功: ${IMAGE_URI}"
+
+      # 🆕 部署状态检查 - 验证镜像是否存在
+      - name: Verify Image Push
+        run: |
+          echo "🔍 验证镜像推送状态..."
+          
+          # 使用 docker manifest 检查镜像是否存在
+          if docker manifest inspect "${{ needs.prepare.outputs.image_uri }}" > /dev/null 2>&1; then
+            echo "✅ 镜像验证成功: ${{ needs.prepare.outputs.image_uri }}"
+          else
+            echo "❌ 镜像验证失败，可能推送未完成"
+            exit 1
+          fi
 
   # =========================================================
-  # 任务 3: 上传代码到 OSS
-  # 使用 AK/SK (保持不变)
+  # 任务 3: 上传代码到 OSS (优化版)
   # =========================================================
   upload-to-oss:
-    needs: analyze-security
+    name: ☁️ Upload to OSS
+    needs: [prepare, analyze-security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,14 +129,143 @@ jobs:
       - name: Setup OSS Tool
         uses: manyuanrong/setup-ossutil@v2.0
         with:
-          # 确保这里使用的是上面 env 定义的上海 Endpoint
           endpoint: "${{ env.OSS_ENDPOINT }}"
-          # 这里继续用 AK/SK，因为 ossutil 需要这个
           access-key-id: "${{ secrets.ALIYUN_ACCESS_KEY_ID }}"
           access-key-secret: "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
 
-      - name: Upload Code
+      # 🆕 优化: 只上传必要文件
+      - name: Prepare Upload Files
         run: |
-          OSS_PATH="oss://${{ env.OSS_BUCKET }}/releases/${{ github.sha }}/"
-          ossutil cp -r . "$OSS_PATH"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          
+          echo "📁 准备上传文件..."
+          
+          # 创建临时目录存放要上传的文件
+          mkdir -p .upload_staging
+          
+          # 只复制必要的文件 (排除 .git, .github, .gitignore 等)
+          cp -r main.py .upload_staging/ 2>/dev/null || true
+          cp -r Dockerfile .upload_staging/ 2>/dev/null || true
+          cp -r requirements.txt .upload_staging/ 2>/dev/null || true
+          cp -r src/ .upload_staging/ 2>/dev/null || true
+          cp -r app/ .upload_staging/ 2>/dev/null || true
+          cp -r config/ .upload_staging/ 2>/dev/null || true
+          
+          # 创建版本元数据文件
+          cat > .upload_staging/manifest.json << EOF
+          {
+            "version": "${VERSION}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit_sha": "${{ github.sha }}",
+            "release_url": "${{ github.event.release.html_url }}",
+            "image_uri": "${{ needs.prepare.outputs.image_uri }}"
+          }
+          EOF
+          
+          echo "📋 待上传文件列表:"
+          ls -la .upload_staging/
+
+      - name: Upload to OSS
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          OSS_PATH="oss://${{ env.OSS_BUCKET }}/releases/${VERSION}/"
+          
+          echo "📤 上传到: ${OSS_PATH}"
+          
+          # 上传文件
+          ossutil cp -r .upload_staging/ "${OSS_PATH}" --include "*"
+          
           echo "✅ 代码上传成功"
+
+      # 🆕 更新 latest 指针文件
+      - name: Update Latest Pointer
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          
+          # 创建 latest.txt 指针
+          echo "${VERSION}" > latest.txt
+          ossutil cp latest.txt "oss://${{ env.OSS_BUCKET }}/releases/latest.txt" -f
+          
+          # 创建 latest.json 包含更多信息
+          cat > latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "image_uri": "${{ needs.prepare.outputs.image_uri }}",
+            "oss_path": "releases/${VERSION}/"
+          }
+          EOF
+          ossutil cp latest.json "oss://${{ env.OSS_BUCKET }}/releases/latest.json" -f
+          
+          echo "✅ Latest 指针更新完成"
+
+      # 🆕 部署状态检查 - 验证 OSS 上传
+      - name: Verify OSS Upload
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          
+          echo "🔍 验证 OSS 上传状态..."
+          
+          # 列出上传的文件
+          ossutil ls "oss://${{ env.OSS_BUCKET }}/releases/${VERSION}/" --limited-num 20
+          
+          # 检查 manifest.json 是否存在
+          if ossutil stat "oss://${{ env.OSS_BUCKET }}/releases/${VERSION}/manifest.json" > /dev/null 2>&1; then
+            echo "✅ OSS 上传验证成功"
+          else
+            echo "❌ OSS 上传验证失败"
+            exit 1
+          fi
+
+  # =========================================================
+  # 任务 4: 部署状态汇总
+  # =========================================================
+  deployment-summary:
+    name: 📊 Deployment Summary
+    needs: [prepare, build-and-push-acr, upload-to-oss]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate Summary
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          IMAGE_URI="${{ needs.prepare.outputs.image_uri }}"
+          
+          echo "# 🚀 部署状态汇总" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 版本信息" >> $GITHUB_STEP_SUMMARY
+          echo "| 项目 | 值 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| **版本号** | \`${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit SHA** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **触发方式** | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 部署产物" >> $GITHUB_STEP_SUMMARY
+          echo "| 产物 | 地址 | 状态 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|------|" >> $GITHUB_STEP_SUMMARY
+          
+          # ACR 状态
+          if [ "${{ needs.build-and-push-acr.result }}" == "success" ]; then
+            echo "| 🐳 Docker 镜像 | \`${IMAGE_URI}\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🐳 Docker 镜像 | \`${IMAGE_URI}\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # OSS 状态
+          if [ "${{ needs.upload-to-oss.result }}" == "success" ]; then
+            echo "| ☁️ OSS 代码包 | \`releases/${VERSION}/\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| ☁️ OSS 代码包 | \`releases/${VERSION}/\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 下一步操作" >> $GITHUB_STEP_SUMMARY
+          echo "- PAI EAS 服务需要手动更新或通过后续流水线自动更新" >> $GITHUB_STEP_SUMMARY
+          echo "- DataWorks 可通过读取 \`releases/latest.txt\` 获取最新版本" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check Overall Status
+        if: needs.build-and-push-acr.result != 'success' || needs.upload-to-oss.result != 'success'
+        run: |
+          echo "❌ 部署存在失败项，请检查日志"
+          exit 1
