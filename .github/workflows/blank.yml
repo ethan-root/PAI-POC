@@ -41,6 +41,10 @@ jobs:
     steps:
       - name: Extract Version Tag
         id: version
+        env:
+          REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          NAMESPACE: capgemini-poc
+          IMAGE_NAME: pai-poc
         run: |
           # 优先使用 Release Tag，否则使用手动输入的版本
           if [ "${{ github.event_name }}" == "release" ]; then
@@ -49,8 +53,21 @@ jobs:
             VERSION="${{ github.event.inputs.version_tag }}"
           fi
           
+          # 检查 VERSION 是否为空
+          if [ -z "$VERSION" ]; then
+            echo "❌ 错误: 版本号为空！"
+            echo "触发方式: ${{ github.event_name }}"
+            exit 1
+          fi
+          
+          # 检查 REGISTRY 是否为空
+          if [ -z "$REGISTRY" ]; then
+            echo "❌ 错误: ACR_REGISTRY secret 未设置！"
+            exit 1
+          fi
+          
           # 构建完整镜像地址
-          IMAGE_URI="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${VERSION}"
+          IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
           echo "tag=${VERSION}" >> $GITHUB_OUTPUT
           echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
