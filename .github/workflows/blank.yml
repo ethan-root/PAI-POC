@@ -294,7 +294,7 @@ jobs:
         run: |
           echo "🚀 开始更新 PAI EAS 服务: pai_poc"
           
-          ./eascmd64 modify pai_poc -s update_service.json
+          ./eascmd64 modify pai_poc -s update_service.json -w 556368
           
           echo "✅ PAI EAS 服务更新命令已执行"
 
@@ -304,11 +304,11 @@ jobs:
           sleep 30
           
           echo "🔍 检查服务状态:"
-          ./eascmd64 desc pai_poc
+          ./eascmd64 desc pai_poc -w 556368
           
           echo ""
           echo "📊 服务版本信息:"
-          ./eascmd64 desc pai_poc | grep -E "(image|version|status)" || true
+          ./eascmd64 desc pai_poc -w 556368 | grep -E "(image|version|status)" || true
 
   # =========================================================
   # 任务 5: 部署状态汇总
