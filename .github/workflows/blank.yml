@@ -37,43 +37,28 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.tag }}
-      image_uri: ${{ steps.version.outputs.image_uri }}
+      # 移除 image_uri 输出，因为它包含 secret 会被 GitHub 跳过
     steps:
       - name: Extract Version Tag
         id: version
-        env:
-          REGISTRY: ${{ secrets.ACR_REGISTRY }}
-          NAMESPACE: capgemini-poc
-          IMAGE_NAME: pai-poc
         run: |
-          # 优先使用 Release Tag，否则使用手动输入的版本
+          # 根据不同触发方式获取版本号
           if [ "${{ github.event_name }}" == "release" ]; then
             VERSION="${{ github.event.release.tag_name }}"
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
           else
             VERSION="${{ github.event.inputs.version_tag }}"
           fi
           
-          # 检查 VERSION 是否为空
           if [ -z "$VERSION" ]; then
             echo "❌ 错误: 版本号为空！"
             echo "触发方式: ${{ github.event_name }}"
             exit 1
           fi
           
-          # 检查 REGISTRY 是否为空
-          if [ -z "$REGISTRY" ]; then
-            echo "❌ 错误: ACR_REGISTRY secret 未设置！"
-            exit 1
-          fi
-          
-          # 构建完整镜像地址
-          IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
-          
           echo "tag=${VERSION}" >> $GITHUB_OUTPUT
-          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
-          
           echo "📦 版本号: ${VERSION}"
-          echo "🐳 镜像地址: ${IMAGE_URI}"
 
   # =========================================================
   # 任务 1: 安全扫描 (CodeQL)
@@ -96,21 +81,24 @@ jobs:
     name: 🐳 Build & Push to ACR
     needs: [prepare, analyze-security]
     runs-on: ubuntu-latest
-    outputs:
-      image_uri: ${{ needs.prepare.outputs.image_uri }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Login to ACR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ secrets.ACR_REGISTRY }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build and Push
+        env:
+          REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          NAMESPACE: capgemini-poc
+          IMAGE_NAME: pai-poc
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          IMAGE_URI="${{ needs.prepare.outputs.image_uri }}"
+          IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
           echo "🔨 构建镜像: ${IMAGE_URI}"
           docker build -t "${IMAGE_URI}" .
@@ -120,14 +108,18 @@ jobs:
           
           echo "✅ 镜像推送成功: ${IMAGE_URI}"
 
-      # 🆕 部署状态检查 - 验证镜像是否存在
       - name: Verify Image Push
+        env:
+          REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          NAMESPACE: capgemini-poc
+          IMAGE_NAME: pai-poc
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          echo "🔍 验证镜像推送状态..."
+          IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
-          # 使用 docker manifest 检查镜像是否存在
-          if docker manifest inspect "${{ needs.prepare.outputs.image_uri }}" > /dev/null 2>&1; then
-            echo "✅ 镜像验证成功: ${{ needs.prepare.outputs.image_uri }}"
+          echo "🔍 验证镜像推送状态..."
+          if docker manifest inspect "${IMAGE_URI}" > /dev/null 2>&1; then
+            echo "✅ 镜像验证成功: ${IMAGE_URI}"
           else
             echo "❌ 镜像验证失败，可能推送未完成"
             exit 1
@@ -152,15 +144,18 @@ jobs:
 
       # 🆕 优化: 只上传必要文件
       - name: Prepare Upload Files
+        env:
+          REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          NAMESPACE: capgemini-poc
+          IMAGE_NAME: pai-poc
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
+          IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
           echo "📁 准备上传文件..."
           
-          # 创建临时目录存放要上传的文件
           mkdir -p .upload_staging
           
-          # 只复制必要的文件 (排除 .git, .github, .gitignore 等)
           cp -r main.py .upload_staging/ 2>/dev/null || true
           cp -r Dockerfile .upload_staging/ 2>/dev/null || true
           cp -r requirements.txt .upload_staging/ 2>/dev/null || true
@@ -168,14 +163,13 @@ jobs:
           cp -r app/ .upload_staging/ 2>/dev/null || true
           cp -r config/ .upload_staging/ 2>/dev/null || true
           
-          # 创建版本元数据文件
           cat > .upload_staging/manifest.json << EOF
           {
             "version": "${VERSION}",
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "commit_sha": "${{ github.sha }}",
             "release_url": "${{ github.event.release.html_url }}",
-            "image_uri": "${{ needs.prepare.outputs.image_uri }}"
+            "image_uri": "${IMAGE_URI}"
           }
           EOF
           
@@ -196,19 +190,22 @@ jobs:
 
       # 🆕 更新 latest 指针文件
       - name: Update Latest Pointer
+        env:
+          REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          NAMESPACE: capgemini-poc
+          IMAGE_NAME: pai-poc
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
+          IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
-          # 创建 latest.txt 指针
           echo "${VERSION}" > latest.txt
           ossutil cp latest.txt "oss://${{ env.OSS_BUCKET }}/releases/latest.txt" -f
           
-          # 创建 latest.json 包含更多信息
           cat > latest.json << EOF
           {
             "version": "${VERSION}",
             "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "image_uri": "${{ needs.prepare.outputs.image_uri }}",
+            "image_uri": "${IMAGE_URI}",
             "oss_path": "releases/${VERSION}/"
           }
           EOF
@@ -244,9 +241,13 @@ jobs:
     if: always()
     steps:
       - name: Generate Summary
+        env:
+          REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          NAMESPACE: capgemini-poc
+          IMAGE_NAME: pai-poc
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          IMAGE_URI="${{ needs.prepare.outputs.image_uri }}"
+          IMAGE_URI="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}:${VERSION}"
           
           echo "# 🚀 部署状态汇总" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -262,14 +263,12 @@ jobs:
           echo "| 产物 | 地址 | 状态 |" >> $GITHUB_STEP_SUMMARY
           echo "|------|------|------|" >> $GITHUB_STEP_SUMMARY
           
-          # ACR 状态
           if [ "${{ needs.build-and-push-acr.result }}" == "success" ]; then
             echo "| 🐳 Docker 镜像 | \`${IMAGE_URI}\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| 🐳 Docker 镜像 | \`${IMAGE_URI}\` | ❌ 失败 |" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # OSS 状态
           if [ "${{ needs.upload-to-oss.result }}" == "success" ]; then
             echo "| ☁️ OSS 代码包 | \`releases/${VERSION}/\` | ✅ 成功 |" >> $GITHUB_STEP_SUMMARY
           else
