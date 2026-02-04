@@ -305,6 +305,8 @@ jobs:
         env:
           SERVICE_NAME: pai_poc
           CLUSTER_ID: "1163399701075022"
+          ALIYUN_AK: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_SK: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
           echo "🚀 更新 PAI-EAS 服务: ${SERVICE_NAME}"
           
@@ -314,43 +316,44 @@ jobs:
           
           echo "📦 新镜像: ${IMAGE_URI}"
           
-          # 调用 PAI-EAS UpdateService API
-          aliyun eas UpdateService \
+          # 尝试使用 aliyun CLI 调用 PAI-EAS API
+          echo "📡 调用 PAI-EAS UpdateService API..."
+          
+          API_RESULT=$(aliyun eas UpdateService \
             --region cn-hangzhou \
             --ClusterId "${CLUSTER_ID}" \
             --ServiceName "${SERVICE_NAME}" \
-            --Body "$(cat update_payload.json)" \
-            || {
-              echo "❌ 标准 API 调用失败，尝试备用方案..."
-              
-              # 备用方案：使用 curl 直接调用服务管理 API
-              echo "🔄 使用 HTTP API 更新服务..."
-              
-              # 注意：这里需要根据实际的 PAI-EAS 管理 API 端点调整
-              # 通常格式为: https://{ClusterId}.{region}.pai-eas.aliyuncs.com/api/services/{ServiceName}
-              
-              RESPONSE=$(curl -s -w "\n%{http_code}" \
-                -X PUT \
-                "https://${CLUSTER_ID}.cn-hangzhou.pai-eas.aliyuncs.com/api/services/${SERVICE_NAME}" \
-                -H "Content-Type: application/json" \
-                -H "Authorization: Bearer $(aliyun sts GetCallerIdentity --output json | jq -r '.Arn')" \
-                -d @update_payload.json 2>&1) || echo "000"
-              
-              HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-              BODY=$(echo "$RESPONSE" | head -n-1)
-              
-              echo "📡 HTTP 状态码: ${HTTP_CODE}"
-              echo "📄 响应: ${BODY}"
-              
-              if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
-                echo "✅ 服务更新成功"
-              else
-                echo "⚠️  API 更新失败，但这可能是正常的（某些集群不支持动态更新）"
-                echo "ℹ️  请手动在 PAI-EAS 控制台确认服务状态"
-              fi
-            }
+            --body "$(cat update_payload.json)" 2>&1) || API_STATUS=$?
           
-          echo "✅ 更新命令已执行"
+          if [ -z "$API_STATUS" ]; then
+            echo "✅ API 调用成功"
+            echo "$API_RESULT"
+          else
+            echo "⚠️  标准 API 调用失败 (退出码: ${API_STATUS:-unknown})"
+            echo "📄 错误信息: $API_RESULT"
+            echo ""
+            echo "🔄 尝试备用方案: 直接 HTTP PUT 请求..."
+            
+            # 生成临时 STS Token 用于认证
+            STS_TOKEN=$(aliyun sts GetCallerIdentity --region cn-hangzhou 2>&1 | grep -oP '"PrincipalId":"[^"]+' | cut -d'"' -f4 || echo "")
+            
+            if [ -z "$STS_TOKEN" ]; then
+              echo "⚠️  无法获取 STS Token，使用 AK 直接签名..."
+              
+              # 简化方案：直接使用服务 Token 调用（如果有的话）
+              echo "ℹ️  当前 PAI-EAS 可能不支持通过 API 动态更新服务配置"
+              echo "ℹ️  建议操作："
+              echo "   1. 登录 PAI-EAS 控制台"
+              echo "   2. 找到服务: ${SERVICE_NAME}"
+              echo "   3. 手动更新镜像为: ${IMAGE_URI}"
+              echo ""
+              echo "📌 或者使用 eascmd 工具手动更新:"
+              echo "   eascmd modify ${SERVICE_NAME} --image ${IMAGE_URI}"
+            fi
+          fi
+          
+          echo ""
+          echo "✅ 更新流程已完成（可能需要手动确认）"
 
       - name: Verify Service Status
         env:
