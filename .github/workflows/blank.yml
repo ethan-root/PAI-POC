@@ -273,9 +273,12 @@ jobs:
           # 生成 dockerAuth (Base64 编码)
           DOCKER_AUTH=$(echo -n "${ACR_USERNAME}:${ACR_PASSWORD}" | base64 -w 0)
           
-          # 创建更新配置文件（保持与现有配置一致）
+          # 创建更新配置文件 - 添加 metadata.workspace_id
           cat > update_service.json << EOF
           {
+            "metadata": {
+              "workspace_id": "556368"
+            },
             "containers": [
               {
                 "image": "${IMAGE_URI}",
@@ -294,7 +297,8 @@ jobs:
         run: |
           echo "🚀 开始更新 PAI EAS 服务: pai_poc"
           
-          ./eascmd64 modify pai_poc -s update_service.json -w 556368
+          # workspace_id 已在 JSON 配置文件中指定，无需命令行参数
+          ./eascmd64 modify pai_poc -s update_service.json
           
           echo "✅ PAI EAS 服务更新命令已执行"
 
@@ -304,11 +308,11 @@ jobs:
           sleep 30
           
           echo "🔍 检查服务状态:"
-          ./eascmd64 desc pai_poc -w 556368
+          ./eascmd64 desc pai_poc
           
           echo ""
           echo "📊 服务版本信息:"
-          ./eascmd64 desc pai_poc -w 556368 | grep -E "(image|version|status)" || true
+          ./eascmd64 desc pai_poc | grep -E "(image|version|status)" || true
 
   # =========================================================
   # 任务 5: 部署状态汇总
