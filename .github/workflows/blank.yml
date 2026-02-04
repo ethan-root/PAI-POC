@@ -238,6 +238,11 @@ jobs:
           sudo mv aliyun /usr/local/bin/
           aliyun version
           echo "✅ Aliyun CLI 安装完成"
+      - name: Install PAI Plugin
+        run: |
+          echo "🔌 安装 PAI CLI 插件..."
+          aliyun plugin install pai --force
+          echo "✅ PAI 插件安装完成"
 
       - name: Configure Aliyun CLI
         env:
@@ -264,42 +269,58 @@ jobs:
       - name: Update PAI-EAS Service via API
         env:
           SERVICE_NAME: pai_poc
-          ALIYUN_AK: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-          ALIYUN_SK: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
           echo "🚀 更新 PAI-EAS 服务: ${SERVICE_NAME}"
           
           NEW_IMAGE=$(jq -r '.containers[0].image' update_payload.json)
           DOCKER_AUTH=$(jq -r '.dockerAuth' update_payload.json)
           echo "📦 新镜像: ${NEW_IMAGE}"
+          echo "🔑 认证信息: ${DOCKER_AUTH:0:20}..."
           
           echo "📡 获取当前服务配置..."
           CURRENT_CONFIG=$(aliyun pai DescribeService \
             --region cn-hangzhou \
             --ServiceName "${SERVICE_NAME}" 2>&1) || { 
-              echo "❌ DescribeService 失败: $CURRENT_CONFIG"; 
+              echo "❌ DescribeService 失败"; 
+              echo "$CURRENT_CONFIG"; 
               exit 1; 
             }
           
           echo "✅ 当前配置获取成功"
           
+          # 保留完整服务配置，只更新镜像和认证信息
           UPDATED_CONFIG=$(echo "$CURRENT_CONFIG" | jq \
             --arg new_image "$NEW_IMAGE" \
             --arg docker_auth "$DOCKER_AUTH" \
-            '.containers[0].image = $new_image | .dockerAuth = $docker_auth')
+            '
+            .containers[0].image = $new_image | 
+            .dockerAuth = $docker_auth |
+            # 确保保留所有必需字段
+            .autoscaler //= {} |
+            .cloud //= {} |
+            .metadata //= {}
+            ')
           
           echo "$UPDATED_CONFIG" > updated_service.json
-          echo "📄 更新后的配置:"
-          cat updated_service.json | jq '.containers[0].image'
           
-          # 步骤 3: 调用 UpdateService API
+          echo "📄 更新后的关键配置:"
+          echo "  镜像: $(echo "$UPDATED_CONFIG" | jq -r '.containers[0].image')"
+          echo "  实例数: $(echo "$UPDATED_CONFIG" | jq -r '.metadata.instance')"
+          echo "  CPU: $(echo "$UPDATED_CONFIG" | jq -r '.metadata.cpu')"
+          echo "  内存: $(echo "$UPDATED_CONFIG" | jq -r '.metadata.memory')"
+          echo "  最小副本: $(echo "$UPDATED_CONFIG" | jq -r '.autoscaler.min')"
+          echo "  最大副本: $(echo "$UPDATED_CONFIG" | jq -r '.autoscaler.max')"
+          
           echo "📡 提交服务更新..."
-          
           UPDATE_RESULT=$(aliyun pai UpdateService \
             --region cn-hangzhou \
             --ServiceName "${SERVICE_NAME}" \
             --body "$(cat updated_service.json)" 2>&1) || { 
-              echo "❌ UpdateService 失败: $UPDATE_RESULT"; 
+              echo "❌ UpdateService 失败"; 
+              echo "$UPDATE_RESULT"; 
+              echo ""; 
+              echo "📋 请检查更新配置:"; 
+              cat updated_service.json | jq '.'; 
               exit 1; 
             }
           
