@@ -1,0 +1,31 @@
+# ========================================
+# Flink 作业部署配置 - DEV 环境
+# ========================================
+# 此文件被 GitHub Action 的 deploy-to-flink 读取
+# 用于配置 Flink Serverless 的资源和启动参数
+
+# 作业并行度
+parallelism: "1"
+
+# JobManager 资源配置
+jobmanager_cpu: "0.5"           # TODO: 根据需要调整 CPU (最小 0.5)
+jobmanager_memory: 1Gi          # TODO: 根据需要调整内存
+
+# TaskManager 资源配置  
+taskmanager_cpu: "0.5"          # TODO: 根据需要调整 CPU
+taskmanager_memory: 1Gi         # TODO: 根据需要调整内存
+
+# Flink 作业入口类 (必须与 Java 代码中的类名一致)
+entry_class: com.example.flink.HelloWorldFlinkJob    # TODO: 修改为你的入口类全限定名
+
+# 传递给 main 方法的参数 (可选)
+main_args: |
+  --env dev
+  --test true
+
+# 额外的依赖文件 (OSS 路径，可选)
+additional_dependencies: []
+# 示例:
+# additional_dependencies:
+#   - oss://your-bucket/path/to/config.yml
+#   - oss://your-bucket/path/to/data.json

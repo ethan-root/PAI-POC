@@ -1,0 +1,65 @@
+# ========================================
+# POC 项目配置清单
+# ========================================
+# 在运行测试前，请填写以下所有 TODO 项
+
+# ==========================================
+# 1. 阿里云配置
+# ==========================================
+aliyun:
+  # OSS 配置
+  oss_bucket: ""              # TODO: OSS Bucket 名称，如 cus-flink-nonprod
+  oss_region: cn-shanghai     # TODO: OSS 区域
+  
+  # Flink Serverless 配置
+  flink_workspace: ""         # TODO: Flink Workspace ID，如 ws-xxxxxx
+  flink_namespace: ""         # TODO: Flink Namespace，如 ns-xxxxxx
+  flink_region: cn-shanghai   # TODO: Flink 区域
+  
+  # 认证信息 (存储在 GitHub Secrets，此处仅作记录)
+  # access_key_id: 存储在 GitHub Secrets -> FLINK_ACCESS_KEY
+  # access_key_secret: 存储在 GitHub Secrets -> FLINK_ACCESS_SECRET
+
+# ==========================================
+# 2. JFrog Artifactory 配置 (可选)
+# ==========================================
+jfrog:
+  enabled: false              # TODO: 是否使用 JFrog，true/false
+  maven_repo_url: ""          # TODO: Maven 仓库地址
+  # 认证信息存储在 GitHub Secrets:
+  # ARTIFACTORY_USERNAME
+  # ARTIFACTORY_PASSWORD
+
+# ==========================================
+# 3. GitHub 配置
+# ==========================================
+github:
+  # 需要在 GitHub 仓库中配置的 Secrets:
+  required_secrets:
+    - FLINK_ACCESS_KEY        # 阿里云 AccessKey ID
+    - FLINK_ACCESS_SECRET     # 阿里云 AccessKey Secret
+  
+  # 需要在 GitHub 仓库中配置的 Variables (可选):
+  optional_variables:
+    - FLINK_DEV_WORKSPACE     # Flink Workspace ID
+    - FLINK_DEV_NAMESPACE     # Flink Namespace
+    - NONPROD_FLINK_OSS_BUCKET  # OSS Bucket 名称
+
+# ==========================================
+# 4. 项目配置
+# ==========================================
+project:
+  group_id: com.example       # TODO: 修改为你的 groupId
+  artifact_id: poc-flink-hello-world
+  version: 1.0.0-SNAPSHOT
+  entry_class: com.example.flink.HelloWorldFlinkJob  # TODO: 与 Java 代码一致
+
+# ==========================================
+# 配置完成后的检查清单
+# ==========================================
+# [ ] 1. 填写了所有 TODO 项
+# [ ] 2. 在 GitHub 仓库配置了 FLINK_ACCESS_KEY Secret
+# [ ] 3. 在 GitHub 仓库配置了 FLINK_ACCESS_SECRET Secret
+# [ ] 4. 阿里云 OSS Bucket 已创建且有写入权限
+# [ ] 5. 阿里云 Flink Serverless 服务已开通
+# [ ] 6. 已确认 Flink 版本与阿里云支持的版本一致

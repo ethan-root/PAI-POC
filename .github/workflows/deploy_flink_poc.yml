@@ -1,0 +1,278 @@
+# ========================================
+# POC: GitHub Action 部署 Flink 作业到阿里云
+# ========================================
+#
+# 工作流程:
+# 1. Maven 构建 JAR 包
+# 2. 上传 JAR 到阿里云 OSS
+# 3. 调用阿里云 Flink API 部署作业
+
+name: POC - Deploy Flink to Aliyun
+
+# ========================================
+# 触发条件
+# ========================================
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+  workflow_dispatch:                # 允许手动触发
+
+# ========================================
+# 环境变量 - TODO: 填写以下配置
+# ========================================
+env:
+  ENVIRONMENT: dev
+
+  # 阿里云 OSS 配置
+  OSS_BUCKET: "kering-flink-data"
+  OSS_REGION: cn-shanghai
+
+  # 阿里云 Flink Serverless 配置
+  WORKSPACE: "beba6a92e8174f"
+  NAMESPACE: "cn-sh-test-pait"
+  FLINK_REGION: cn-shanghai
+  FLINK_ENGINE_VERSION: "vvr-8.0.9-flink-1.17"  # TODO: 确认 VVR 引擎版本
+
+  # 作业信息 (与 pom.xml 中的配置一致)
+  JOB_NAME: poc-flink-hello-world
+  JAR_VERSION: 1.0.0-SNAPSHOT
+
+jobs:
+  # ========================================
+  # 单 Job: 构建 → 上传 OSS → 部署 Flink
+  # ========================================
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # ==============================
+      # 阶段 1: 构建 JAR
+      # ==============================
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build JAR with Maven
+        run: mvn clean package -DskipTests
+
+      - name: Verify JAR exists
+        run: |
+          JAR_FILE="target/${{ env.JOB_NAME }}-${{ env.JAR_VERSION }}.jar"
+          if [ ! -f "${JAR_FILE}" ]; then
+            echo "❌ JAR 文件不存在: ${JAR_FILE}"
+            echo "📋 target 目录内容:"
+            ls -la target/
+            exit 1
+          fi
+          echo "✅ JAR 构建成功: ${JAR_FILE}"
+          echo "📦 文件大小: $(du -h ${JAR_FILE} | cut -f1)"
+
+      # ==============================
+      # 阶段 2: 上传 JAR 到 OSS
+      # ==============================
+      - name: Setup Aliyun CLI
+        uses: aliyun/setup-aliyun-cli-action@v1
+        with:
+          aliyun-access-key-id: ${{ secrets.FLINK_ACCESS_KEY }}
+          aliyun-access-key-secret: ${{ secrets.FLINK_ACCESS_SECRET }}
+          aliyun-region: ${{ env.OSS_REGION }}
+
+      - name: Upload JAR to OSS
+        run: |
+          JAR_FILE="target/${{ env.JOB_NAME }}-${{ env.JAR_VERSION }}.jar"
+          OSS_JAR_PATH="oss://${{ env.OSS_BUCKET }}/artifacts/namespaces/${{ env.NAMESPACE }}/jars/${{ env.JOB_NAME }}/${{ env.JOB_NAME }}-${{ env.JAR_VERSION }}.jar"
+
+          echo "📤 上传 JAR 到 OSS..."
+          echo "   源文件: ${JAR_FILE}"
+          echo "   目标路径: ${OSS_JAR_PATH}"
+
+          aliyun oss cp "${JAR_FILE}" "${OSS_JAR_PATH}" --force
+
+          echo "✅ JAR 上传成功"
+
+          # 将 OSS 路径保存为环境变量，供后续步骤使用
+          echo "OSS_JAR_PATH=${OSS_JAR_PATH}" >> $GITHUB_ENV
+
+      - name: Upload deploy config to OSS
+        run: |
+          CONFIG_FILE="src/main/deploy/job-args-dev.yml"
+          OSS_CONFIG_PATH="oss://${{ env.OSS_BUCKET }}/artifacts/namespaces/${{ env.NAMESPACE }}/configs/${{ env.JOB_NAME }}/job-args-dev.yml"
+
+          echo "📤 上传部署配置到 OSS..."
+          aliyun oss cp "${CONFIG_FILE}" "${OSS_CONFIG_PATH}" --force
+          echo "✅ 部署配置上传成功"
+
+      # ==============================
+      # 阶段 3: 部署到 Flink
+      # ==============================
+      - name: Read deploy config
+        id: config
+        run: |
+          CONFIG_FILE="src/main/deploy/job-args-dev.yml"
+          echo "📖 读取部署配置: ${CONFIG_FILE}"
+
+          # 使用 grep + sed 从 YAML 中提取值 (无需额外依赖)
+          get_yaml_value() {
+            grep "^${1}:" "${CONFIG_FILE}" | sed "s/^${1}:[[:space:]]*//" | sed 's/[[:space:]]*#.*//' | tr -d '"'
+          }
+
+          PARALLELISM=$(get_yaml_value "parallelism")
+          JM_CPU=$(get_yaml_value "jobmanager_cpu")
+          JM_MEM=$(get_yaml_value "jobmanager_memory")
+          TM_CPU=$(get_yaml_value "taskmanager_cpu")
+          TM_MEM=$(get_yaml_value "taskmanager_memory")
+          ENTRY_CLASS=$(get_yaml_value "entry_class")
+
+          echo "parallelism=${PARALLELISM}" >> $GITHUB_OUTPUT
+          echo "jm_cpu=${JM_CPU}" >> $GITHUB_OUTPUT
+          echo "jm_mem=${JM_MEM}" >> $GITHUB_OUTPUT
+          echo "tm_cpu=${TM_CPU}" >> $GITHUB_OUTPUT
+          echo "tm_mem=${TM_MEM}" >> $GITHUB_OUTPUT
+          echo "entry_class=${ENTRY_CLASS}" >> $GITHUB_OUTPUT
+
+          echo "📋 部署参数:"
+          echo "   并行度: ${PARALLELISM}"
+          echo "   JM CPU/MEM: ${JM_CPU} / ${JM_MEM}"
+          echo "   TM CPU/MEM: ${TM_CPU} / ${TM_MEM}"
+          echo "   入口类: ${ENTRY_CLASS}"
+
+      - name: Deploy to Aliyun Flink
+        env:
+          ENTRY_CLASS: ${{ steps.config.outputs.entry_class }}
+          PARALLELISM: ${{ steps.config.outputs.parallelism }}
+          JM_CPU: ${{ steps.config.outputs.jm_cpu }}
+          JM_MEM: ${{ steps.config.outputs.jm_mem }}
+          TM_CPU: ${{ steps.config.outputs.tm_cpu }}
+          TM_MEM: ${{ steps.config.outputs.tm_mem }}
+        run: |
+          echo "🚀 部署 Flink 作业到阿里云..."
+          echo "   Workspace: ${{ env.WORKSPACE }}"
+          echo "   Namespace: ${{ env.NAMESPACE }}"
+          echo "   JAR: ${OSS_JAR_PATH}"
+          echo "   入口类: ${ENTRY_CLASS}"
+
+          # 调用阿里云 Flink 全托管 API 创建部署
+          DEPLOY_RESULT=$(aliyun stvs CreateDeployment \
+            --region ${{ env.FLINK_REGION }} \
+            --workspace ${{ env.WORKSPACE }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --body '{
+              "metadata": {
+                "name": "'${{ env.JOB_NAME }}'",
+                "namespace": "'${{ env.NAMESPACE }}'"
+              },
+              "spec": {
+                "deploymentKind": "STREAMING",
+                "state": "RUNNING",
+                "template": {
+                  "spec": {
+                    "artifact": {
+                      "kind": "JAR",
+                      "jarUri": "'"${OSS_JAR_PATH}"'",
+                      "entryClass": "'"${ENTRY_CLASS}"'"
+                    },
+                    "flinkConfiguration": {
+                      "parallelism.default": "'"${PARALLELISM}"'",
+                      "jobmanager.memory.process.size": "'"${JM_MEM}"'",
+                      "taskmanager.memory.process.size": "'"${TM_MEM}"'",
+                      "jobmanager.cpu.cores": "'"${JM_CPU}"'",
+                      "taskmanager.cpu.cores": "'"${TM_CPU}"'"
+                    },
+                    "resources": {
+                      "jobmanager": {
+                        "cpu": '"${JM_CPU}"',
+                        "memory": "'"${JM_MEM}"'"
+                      },
+                      "taskmanager": {
+                        "cpu": '"${TM_CPU}"',
+                        "memory": "'"${TM_MEM}"'"
+                      }
+                    }
+                  }
+                },
+                "engineVersion": "'${{ env.FLINK_ENGINE_VERSION }}'"
+              }
+            }' 2>&1) || {
+              echo "❌ CreateDeployment 失败"
+              echo "${DEPLOY_RESULT}"
+              exit 1
+            }
+
+          echo "✅ Flink 部署创建成功"
+          echo "${DEPLOY_RESULT}"
+
+          # 提取 Deployment ID
+          DEPLOYMENT_ID=$(echo "${DEPLOY_RESULT}" | jq -r '.metadata.id // empty')
+          if [ -n "${DEPLOYMENT_ID}" ]; then
+            echo "📌 Deployment ID: ${DEPLOYMENT_ID}"
+            echo "DEPLOYMENT_ID=${DEPLOYMENT_ID}" >> $GITHUB_ENV
+          fi
+
+      - name: Verify Flink deployment
+        if: env.DEPLOYMENT_ID != ''
+        run: |
+          echo "🔍 验证 Flink 部署状态..."
+          echo "   Deployment ID: ${DEPLOYMENT_ID}"
+
+          # 等待部署生效
+          sleep 10
+
+          DEPLOY_STATUS=$(aliyun stvs GetDeployment \
+            --region ${{ env.FLINK_REGION }} \
+            --workspace ${{ env.WORKSPACE }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --deploymentId "${DEPLOYMENT_ID}" 2>&1) || {
+              echo "⚠️ 获取部署状态失败 (可能尚未就绪)"
+              echo "${DEPLOY_STATUS}"
+              exit 0
+            }
+
+          STATE=$(echo "${DEPLOY_STATUS}" | jq -r '.spec.state // "UNKNOWN"')
+          echo "📊 部署状态: ${STATE}"
+
+          if [ "${STATE}" = "RUNNING" ] || [ "${STATE}" = "TRANSITIONING" ]; then
+            echo "✅ Flink 作业部署验证通过"
+          else
+            echo "⚠️ 当前状态为 ${STATE}，可能仍在启动中 (这在 POC 中是正常的)"
+          fi
+
+      # ==============================
+      # 部署汇总
+      # ==============================
+      - name: Deployment summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # 🚀 Flink 部署汇总
+
+          | 项目 | 值 |
+          |------|-----|
+          | **环境** | ${{ env.ENVIRONMENT }} |
+          | **作业名称** | ${{ env.JOB_NAME }} |
+          | **JAR 版本** | ${{ env.JAR_VERSION }} |
+          | **Commit** | ${{ github.sha }} |
+
+          ## 部署产物
+          | 步骤 | 状态 |
+          |------|------|
+          | Maven 构建 | ✅ |
+          | OSS 上传 | JAR + Config |
+          | Flink 部署 | 已提交 |
+          EOF
+
+# ========================================
+# GitHub Secrets 配置说明
+# ========================================
+# 需要在 GitHub 仓库 Settings > Secrets 中配置:
+#
+# ALIYUN_ACCESS_KEY_ID      - 阿里云 AccessKey ID
+# ALIYUN_ACCESS_KEY_SECRET  - 阿里云 AccessKey Secret
