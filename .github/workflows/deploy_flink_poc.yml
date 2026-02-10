@@ -18,6 +18,7 @@ on:
     paths:
       - 'src/**'
       - 'pom.xml'
+      - '.github/workflows/**'
   workflow_dispatch:                # 允许手动触发
 
 # ========================================
@@ -174,10 +175,11 @@ jobs:
           echo "   入口类: ${ENTRY_CLASS}"
 
           # 调用阿里云 Flink 全托管 API 创建部署
-          DEPLOY_RESULT=$(aliyun stream CreateDeployment \
+          # 注意: workspace/namespace 可能需要作为 header 传递，而非 flag (CLI bug/metadata issue)
+          DEPLOY_RESULT=$(aliyun ververica CreateDeployment \
+            --header "workspace=${{ env.WORKSPACE }}" \
+            --header "namespace=${{ env.NAMESPACE }}" \
             --region ${{ env.FLINK_REGION }} \
-            --workspace ${{ env.WORKSPACE }} \
-            --namespace ${{ env.NAMESPACE }} \
             --body '{
               "metadata": {
                 "name": "'${{ env.JOB_NAME }}'",
@@ -239,10 +241,10 @@ jobs:
           # 等待部署生效
           sleep 10
 
-          DEPLOY_STATUS=$(aliyun stream GetDeployment \
+          DEPLOY_STATUS=$(aliyun ververica GetDeployment \
+            --header "workspace=${{ env.WORKSPACE }}" \
+            --header "namespace=${{ env.NAMESPACE }}" \
             --region ${{ env.FLINK_REGION }} \
-            --workspace ${{ env.WORKSPACE }} \
-            --namespace ${{ env.NAMESPACE }} \
             --deploymentId "${DEPLOYMENT_ID}" 2>&1) || {
               echo "⚠️ 获取部署状态失败 (可能尚未就绪)"
               echo "${DEPLOY_STATUS}"
