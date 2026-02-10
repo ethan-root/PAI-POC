@@ -174,7 +174,7 @@ jobs:
           echo "   入口类: ${ENTRY_CLASS}"
 
           # 调用阿里云 Flink 全托管 API 创建部署
-          DEPLOY_RESULT=$(aliyun ververica CreateDeployment \
+          DEPLOY_RESULT=$(aliyun stream CreateDeployment \
             --region ${{ env.FLINK_REGION }} \
             --workspace ${{ env.WORKSPACE }} \
             --namespace ${{ env.NAMESPACE }} \
@@ -239,7 +239,7 @@ jobs:
           # 等待部署生效
           sleep 10
 
-          DEPLOY_STATUS=$(aliyun ververica GetDeployment \
+          DEPLOY_STATUS=$(aliyun stream GetDeployment \
             --region ${{ env.FLINK_REGION }} \
             --workspace ${{ env.WORKSPACE }} \
             --namespace ${{ env.NAMESPACE }} \
