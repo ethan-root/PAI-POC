@@ -79,23 +79,35 @@ jobs:
       # ==============================
       # 阶段 2: 上传 JAR 到 OSS
       # ==============================
-      - name: Setup Aliyun CLI
-        uses: aliyun/setup-aliyun-cli-action@v1
-        with:
-          aliyun-access-key-id: ${{ secrets.FLINK_ACCESS_KEY }}
-          aliyun-access-key-secret: ${{ secrets.FLINK_ACCESS_SECRET }}
-          aliyun-region: ${{ env.OSS_REGION }}
+      - name: Install and Configure Aliyun CLI
+        run: |
+          echo "📦 安装 Aliyun CLI..."
+          wget -q https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+          tar -xzf aliyun-cli-linux-latest-amd64.tgz
+          sudo mv aliyun /usr/local/bin/
+          aliyun version
+
+          echo "🔑 配置认证..."
+          aliyun configure set \
+            --profile default \
+            --mode AK \
+            --region ${{ env.OSS_REGION }} \
+            --access-key-id "${{ secrets.FLINK_ACCESS_KEY }}" \
+            --access-key-secret "${{ secrets.FLINK_ACCESS_SECRET }}"
+          echo "✅ Aliyun CLI 配置完成"
 
       - name: Upload JAR to OSS
         run: |
           JAR_FILE="target/${{ env.JOB_NAME }}-${{ env.JAR_VERSION }}.jar"
           OSS_JAR_PATH="oss://${{ env.OSS_BUCKET }}/artifacts/namespaces/${{ env.NAMESPACE }}/jars/${{ env.JOB_NAME }}/${{ env.JOB_NAME }}-${{ env.JAR_VERSION }}.jar"
+          OSS_ENDPOINT="oss-${{ env.OSS_REGION }}.aliyuncs.com"
 
           echo "📤 上传 JAR 到 OSS..."
           echo "   源文件: ${JAR_FILE}"
           echo "   目标路径: ${OSS_JAR_PATH}"
+          echo "   Endpoint: ${OSS_ENDPOINT}"
 
-          aliyun oss cp "${JAR_FILE}" "${OSS_JAR_PATH}" --force
+          aliyun oss cp "${JAR_FILE}" "${OSS_JAR_PATH}" --endpoint "${OSS_ENDPOINT}" --force
 
           echo "✅ JAR 上传成功"
 
@@ -106,9 +118,10 @@ jobs:
         run: |
           CONFIG_FILE="src/main/deploy/job-args-dev.yml"
           OSS_CONFIG_PATH="oss://${{ env.OSS_BUCKET }}/artifacts/namespaces/${{ env.NAMESPACE }}/configs/${{ env.JOB_NAME }}/job-args-dev.yml"
+          OSS_ENDPOINT="oss-${{ env.OSS_REGION }}.aliyuncs.com"
 
           echo "📤 上传部署配置到 OSS..."
-          aliyun oss cp "${CONFIG_FILE}" "${OSS_CONFIG_PATH}" --force
+          aliyun oss cp "${CONFIG_FILE}" "${OSS_CONFIG_PATH}" --endpoint "${OSS_ENDPOINT}" --force
           echo "✅ 部署配置上传成功"
 
       # ==============================
