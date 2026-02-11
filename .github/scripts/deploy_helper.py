@@ -165,16 +165,15 @@ def main():
         final_deployment_id = data_section.get("deploymentId")
         
         if final_deployment_id:
-            print(f"Starting deployment {final_deployment_id}...")
-            start_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{final_deployment_id}/start"
+            print(f"Starting deployment {final_deployment_id} (setting state to RUNNING)...")
+            # The API does not have a /start endpoint. We must PATCH the deployment state to RUNNING.
+            patch_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{final_deployment_id}"
             start_body = {
-                "restoreStrategy": {
-                    "kind": "NONE" 
-                }
+                "state": "RUNNING"
             }
             
             start_args = [
-                "ververica", "POST", start_url,
+                "ververica", "PATCH", patch_url,
                 "--endpoint", flink_endpoint,
                 "--header", f"workspace={flink_workspace}",
                 "--header", "Content-Type=application/json",
@@ -182,7 +181,7 @@ def main():
             ]
             
             start_output = run_aliyun_command(start_args)
-            print("Start Command Response:")
+            print("Start (PATCH) Command Response:")
             print(start_output)
             
             if start_output:
