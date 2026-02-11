@@ -72,36 +72,6 @@ jobs:
         run: ls -la ./jars/
 
       # ==========================================
-      # Step: 安装 ossutil 并上传 JAR 到 OSS
-      # ==========================================
-      - name: Install ossutil
-        run: |
-          curl -o ossutil https://gosspublic.alicdn.com/ossutil/v2/2.0.3-beta.09171530/linux-amd64/ossutil
-          chmod +x ossutil
-          sudo mv ossutil /usr/local/bin/
-
-      - name: Upload JAR to OSS
-        env:
-          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-        run: |
-          JAR_FILE=$(ls ./jars/*.jar | head -1)
-          JAR_FILENAME=$(basename $JAR_FILE)
-          echo "Uploading $JAR_FILENAME to OSS..."
-
-          OSS_PATH="oss://${{ vars.OSS_BUCKET }}/artifacts/namespaces/${{ vars.FLINK_NAMESPACE }}/${JAR_FILENAME}"
-          echo "OSS target: $OSS_PATH"
-
-          ossutil cp "$JAR_FILE" "$OSS_PATH" \
-            --access-key-id "$OSS_ACCESS_KEY_ID" \
-            --access-key-secret "$OSS_ACCESS_KEY_SECRET" \
-            --region ${{ vars.OSS_REGION }} \
-            --force
-
-          echo "jar_oss_path=$OSS_PATH" >> $GITHUB_ENV
-          echo "✅ JAR uploaded successfully"
-
-      # ==========================================
       # Step: 安装并配置阿里云 CLI
       # ==========================================
       - name: Install Aliyun CLI
@@ -118,10 +88,43 @@ jobs:
           aliyun configure set \
             --profile default \
             --mode AK \
-            --region ${{ vars.FLINK_REGION }} \
+            --region ${{ vars.OSS_REGION }} \
             --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
             --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
           echo "✅ CLI configured"
+
+      - name: Validate required variables
+        run: |
+          MISSING=""
+          [ -z "${{ vars.OSS_BUCKET }}" ] && MISSING="${MISSING} OSS_BUCKET"
+          [ -z "${{ vars.OSS_REGION }}" ] && MISSING="${MISSING} OSS_REGION"
+          [ -z "${{ vars.FLINK_WORKSPACE }}" ] && MISSING="${MISSING} FLINK_WORKSPACE"
+          [ -z "${{ vars.FLINK_NAMESPACE }}" ] && MISSING="${MISSING} FLINK_NAMESPACE"
+          [ -z "${{ vars.FLINK_REGION }}" ] && MISSING="${MISSING} FLINK_REGION"
+          if [ -n "$MISSING" ]; then
+            echo "❌ Missing required GitHub Variables:${MISSING}"
+            echo "   请在 GitHub 仓库 Settings → Secrets and variables → Actions → Variables 中配置"
+            exit 1
+          fi
+          echo "✅ All required variables are set"
+
+      # ==========================================
+      # Step: 上传 JAR 到 OSS（使用 aliyun oss 命令）
+      # ==========================================
+      - name: Upload JAR to OSS
+        run: |
+          JAR_FILE=$(ls ./jars/*.jar | head -1)
+          JAR_FILENAME=$(basename $JAR_FILE)
+          echo "Uploading $JAR_FILENAME to OSS..."
+
+          OSS_PATH="oss://${{ vars.OSS_BUCKET }}/artifacts/namespaces/${{ vars.FLINK_NAMESPACE }}/${JAR_FILENAME}"
+          echo "OSS target: $OSS_PATH"
+
+          aliyun oss cp "$JAR_FILE" "$OSS_PATH" -f --region ${{ vars.OSS_REGION }}
+
+          echo "jar_oss_path=$OSS_PATH" >> $GITHUB_ENV
+          echo "✅ JAR uploaded successfully"
+
 
       # ==========================================
       # Step: 部署 Flink 作业到阿里云 Realtime Compute
