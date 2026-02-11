@@ -46,6 +46,7 @@ def main():
     deployment_json = {
         "name": job_name,
         "namespace": flink_namespace,
+        "state": "RUNNING",
         "executionMode": "STREAMING",
         "engineVersion": "vvr-8.0.11-jdk11-flink-1.17",
         "artifact": {
@@ -122,9 +123,8 @@ def main():
     # 2. Update or Create
     if deployment_id:
         print(f"Found existing deployment ID: {deployment_id}. Updating...")
-        update_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{deployment_id}"
         deploy_args = [
-            "ververica", "PATCH", update_url,
+            "ververica", "PUT", f"/api/v2/namespaces/{flink_namespace}/deployments/{deployment_id}",
             "--endpoint", flink_endpoint,
             "--header", f"workspace={flink_workspace}",
             "--header", "Content-Type=application/json",
@@ -159,39 +159,7 @@ def main():
             sys.exit(1)
         
         print("Deployment configuration updated successfully.")
-        
-        # Extract Deployment ID to start the job
-        data_section = result_json.get("data", {})
-        final_deployment_id = data_section.get("deploymentId")
-        
-        if final_deployment_id:
-            print(f"Starting deployment {final_deployment_id} (setting state to RUNNING)...")
-            # The API does not have a /start endpoint. We must PATCH the deployment state to RUNNING.
-            patch_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{final_deployment_id}"
-            start_body = {
-                "state": "RUNNING"
-            }
-            
-            start_args = [
-                "ververica", "PATCH", patch_url,
-                "--endpoint", flink_endpoint,
-                "--header", f"workspace={flink_workspace}",
-                "--header", "Content-Type=application/json",
-                "--body", json.dumps(start_body)
-            ]
-            
-            start_output = run_aliyun_command(start_args)
-            print("Start (PATCH) Command Response:")
-            print(start_output)
-            
-            if start_output:
-                start_json = json.loads(start_output)
-                if start_json.get("success") is True:
-                     print("✅ Flink job started successfully!")
-                else:
-                     print(f"⚠️ Warning: Start command might have failed. Code: {start_json.get('errorCode')}")
-        else:
-            print("Could not find deploymentId in response, skipping start.")
+
 
     except json.JSONDecodeError:
         print("Failed to parse deployment response")
