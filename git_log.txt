@@ -1,0 +1,15 @@
+﻿dbd0fa6 fix: recreate workflow file to resolve missing commit
+18159fd refactor: use custom action deploy-to-flink for Flink deployment
+c0ed84c fix: revert to 'aliyun ververica' with headers and fix trigger paths
+aa6202c fix: use 'aliyun stream' instead of 'ververica' to resolve parameter errors
+f1eabce fix: use correct aliyun ververica product code
+949c3dc fix: resolve region empty error - use manual aliyun CLI config with explicit OSS endpoint
+1c0c47f refactor: simplify Flink pipeline - remove JFrog, add direct OSS upload and Flink deploy
+7ea06f8 update1
+9a79c55 update
+89edb44 fix: separate PAI plugin install and permission verification steps
+b0e8e8c fix: reorder CLI setup steps - configure before plugin install
+ffff4a8 fix: optimize PAI service update to preserve complete config
+d2d5e44 refactor: apply complete corrected workflow with pai CLI fixes
+148bc4e fix: change exit 1 to exit 0 to allow workflow completion
+7356412 fix: fetch current service config before update

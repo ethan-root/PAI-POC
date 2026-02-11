@@ -1,0 +1,13 @@
+﻿origin	git@github.com:ethan-root/PAI-POC.git (fetch)
+origin	git@github.com:ethan-root/PAI-POC.git (push)
+
+file:D:/Git/Git/etc/gitconfig	credential.helper=manager
+file:D:/Git/Git/etc/gitconfig	credential.https://dev.azur
+e.com.usehttppath=true
+file:.git/config	remote.origin.url=git@github.com:ethan-r
+oot/PAI-POC.git
+file:.git/config	remote.origin.fetch=+refs/heads/*:refs/r
+emotes/origin/*
+file:.git/config	branch.main.remote=origin
+
+

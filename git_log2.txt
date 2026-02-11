@@ -1,0 +1,3 @@
+﻿c0ed84c fix: revert to 'aliyun ververica' with headers and fix trigger paths
+aa6202c fix: use 'aliyun stream' instead of 'ververica' to resolve parameter errors
+f1eabce fix: use correct aliyun ververica product code
