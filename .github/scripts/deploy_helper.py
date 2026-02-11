@@ -1,0 +1,141 @@
+import os
+import sys
+import json
+import subprocess
+
+def run_aliyun_command(args):
+    """Run aliyun CLI command and return the JSON result."""
+    try:
+        # Construct the full command
+        cmd = ["aliyun"] + args
+        print(f"Executing: {' '.join(cmd)}")
+        
+        # Execute without shell=True to avoid escaping issues
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"Command failed with exit code {result.returncode}")
+            print("STDERR:", result.stderr)
+            print("STDOUT:", result.stdout)
+            return None
+            
+        return result.stdout
+    except Exception as e:
+        print(f"Exception during command execution: {e}")
+        return None
+
+def main():
+    # Load configuration from environment variables
+    job_name = os.environ.get("JOB_NAME")
+    entry_class = os.environ.get("ENTRY_CLASS")
+    jar_oss_path = os.environ.get("jar_oss_path")
+    flink_namespace = os.environ.get("FLINK_NAMESPACE")
+    flink_workspace = os.environ.get("FLINK_WORKSPACE")
+    flink_endpoint = os.environ.get("FLINK_ENDPOINT")
+
+    if not all([job_name, entry_class, jar_oss_path, flink_namespace, flink_workspace, flink_endpoint]):
+        print("Error: Missing required environment variables.")
+        sys.exit(1)
+
+    print(f"Deploying Job: {job_name}")
+    print(f"Namespace: {flink_namespace}")
+
+    # Construct Deployment JSON
+    deployment_json = {
+        "kind": "Deployment",
+        "apiVersion": "v1",
+        "metadata": {
+            "name": job_name,
+            "namespace": flink_namespace
+        },
+        "spec": {
+            "state": "RUNNING",
+            "template": {
+                "spec": {
+                    "artifact": {
+                        "kind": "JAR",
+                        "jarUri": jar_oss_path,
+                        "entryClass": entry_class
+                    },
+                    "parallelism": 1,
+                    "resources": {
+                        "jobmanager": {"cpu": 0.5, "memory": "1Gi"},
+                        "taskmanager": {"cpu": 0.5, "memory": "1Gi"}
+                    }
+                }
+            }
+        }
+    }
+
+    json_body = json.dumps(deployment_json)
+    print("Deployment Config:")
+    print(json_body)
+
+    # 1. Check existing deployment
+    check_url = f"/api/v2/namespaces/{flink_namespace}/deployments"
+    check_args = [
+        "ververica", "GET", check_url,
+        "--endpoint", flink_endpoint,
+        "--header", f"workspace={flink_workspace}"
+    ]
+    
+    list_output = run_aliyun_command(check_args)
+    deployment_id = None
+    
+    if list_output:
+        try:
+            data = json.loads(list_output)
+            deployments = data.get("data", {}).get("deployments", [])
+            for dep in deployments:
+                if dep.get("metadata", {}).get("name") == job_name:
+                    deployment_id = dep.get("metadata", {}).get("id")
+                    break
+        except json.JSONDecodeError:
+            print("Failed to parse GET response")
+
+    # 2. Update or Create
+    if deployment_id:
+        print(f"Found existing deployment ID: {deployment_id}. Updating...")
+        update_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{deployment_id}"
+        deploy_args = [
+            "ververica", "PATCH", update_url,
+            "--endpoint", flink_endpoint,
+            "--header", f"workspace={flink_workspace}",
+            "--header", "Content-Type=application/json",
+            "--body", json_body
+        ]
+    else:
+        print("No existing deployment found. Creating new...")
+        create_url = f"/api/v2/namespaces/{flink_namespace}/deployments"
+        deploy_args = [
+            "ververica", "POST", create_url,
+            "--endpoint", flink_endpoint,
+            "--header", f"workspace={flink_workspace}",
+            "--header", "Content-Type=application/json",
+            "--body", json_body
+        ]
+
+    result_output = run_aliyun_command(deploy_args)
+    if not result_output:
+        print("Deployment command failed.")
+        sys.exit(1)
+
+    print("Response:")
+    print(result_output)
+
+    # 3. Verify Success
+    try:
+        result_json = json.loads(result_output)
+        if result_json.get("success") is not True:
+            print("API returned success=false")
+            print(f"Error Code: {result_json.get('errorCode')}")
+            print(f"Error Message: {result_json.get('errorMessage')}")
+            sys.exit(1)
+        else:
+            print("Deployment Successful!")
+    except json.JSONDecodeError:
+        print("Failed to parse deployment response")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
