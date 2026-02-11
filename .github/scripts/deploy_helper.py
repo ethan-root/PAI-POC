@@ -84,12 +84,38 @@ def main():
     
     if list_output:
         try:
-            data = json.loads(list_output)
-            deployments = data.get("data", {}).get("deployments", [])
-            for dep in deployments:
-                if dep.get("metadata", {}).get("name") == job_name:
-                    deployment_id = dep.get("metadata", {}).get("id")
-                    break
+            print(f"GET Response length: {len(list_output)}")
+            try:
+                data = json.loads(list_output)
+                print(f"Parsed response type: {type(data)}")
+                
+                deployments = []
+                if isinstance(data, list):
+                    deployments = data
+                elif isinstance(data, dict):
+                    # Handle { "data": { "deployments": [...] } } pattern
+                    inner_data = data.get("data")
+                    if isinstance(inner_data, dict):
+                        deployments = inner_data.get("deployments", [])
+                    # Handle { "deployments": [...] } pattern
+                    elif isinstance(inner_data, list):
+                         deployments = inner_data
+                    elif "deployments" in data:
+                        deployments = data.get("deployments", [])
+                
+                print(f"Found {len(deployments)} deployments.")
+                
+                for dep in deployments:
+                    # Robustly access metadata
+                    if not isinstance(dep, dict):
+                        continue
+                    metadata = dep.get("metadata", {})
+                    if metadata.get("name") == job_name:
+                        deployment_id = metadata.get("id")
+                        break
+            except Exception as e:
+                print(f"Error parsing deployment list: {e}")
+                print(f"Raw output snippet: {list_output[:500]}")
         except json.JSONDecodeError:
             print("Failed to parse GET response")
 
