@@ -101,6 +101,10 @@ def main():
                 
                 print(f"Found {len(deployments)} deployments.")
                 
+                if len(deployments) > 0:
+                    print("DEBUG: Full JSON of first existing deployment:")
+                    print(json.dumps(deployments[0], indent=2))
+                
                 for dep in deployments:
                     if not isinstance(dep, dict):
                         continue
