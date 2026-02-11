@@ -149,7 +149,7 @@ def main():
     print("Response:")
     print(result_output)
 
-    # 3. Verify Success
+    # 3. Verify Success and Start Deployment
     try:
         result_json = json.loads(result_output)
         if result_json.get("success") is not True:
@@ -157,8 +157,43 @@ def main():
             print(f"Error Code: {result_json.get('errorCode')}")
             print(f"Error Message: {result_json.get('errorMessage')}")
             sys.exit(1)
+        
+        print("Deployment configuration updated successfully.")
+        
+        # Extract Deployment ID to start the job
+        data_section = result_json.get("data", {})
+        final_deployment_id = data_section.get("deploymentId")
+        
+        if final_deployment_id:
+            print(f"Starting deployment {final_deployment_id}...")
+            start_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{final_deployment_id}/start"
+            start_body = {
+                "restoreStrategy": {
+                    "kind": "NONE" 
+                }
+            }
+            
+            start_args = [
+                "ververica", "POST", start_url,
+                "--endpoint", flink_endpoint,
+                "--header", f"workspace={flink_workspace}",
+                "--header", "Content-Type=application/json",
+                "--body", json.dumps(start_body)
+            ]
+            
+            start_output = run_aliyun_command(start_args)
+            print("Start Command Response:")
+            print(start_output)
+            
+            if start_output:
+                start_json = json.loads(start_output)
+                if start_json.get("success") is True:
+                     print("✅ Flink job started successfully!")
+                else:
+                     print(f"⚠️ Warning: Start command might have failed. Code: {start_json.get('errorCode')}")
         else:
-            print("Deployment Successful!")
+            print("Could not find deploymentId in response, skipping start.")
+
     except json.JSONDecodeError:
         print("Failed to parse deployment response")
         sys.exit(1)
