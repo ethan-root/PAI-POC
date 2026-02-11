@@ -102,10 +102,109 @@ jobs:
           echo "✅ JAR uploaded successfully"
 
       # ==========================================
-      # Step: 部署 Flink 作业（复用团队标准 Action）
+      # Step: 安装并配置阿里云 CLI
       # ==========================================
-      - name: Deploy to Flink
-        uses: kering-technologies-china/dso-cus-github-action/flink/deploy-to-flink@main
-        with:
-          jobName: ${{ env.JOB_NAME }}
-          jarFilename: ${{ env.JOB_NAME }}-${{ env.JAR_VERSION }}.jar
+      - name: Install Aliyun CLI
+        run: |
+          echo "📦 Installing Aliyun CLI..."
+          wget -q https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+          tar -xzf aliyun-cli-linux-latest-amd64.tgz
+          sudo mv aliyun /usr/local/bin/
+          aliyun version
+          echo "✅ Aliyun CLI installed"
+
+      - name: Configure Aliyun CLI
+        run: |
+          aliyun configure set \
+            --profile default \
+            --mode AK \
+            --region ${{ vars.FLINK_REGION }} \
+            --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
+            --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
+          echo "✅ CLI configured"
+
+      # ==========================================
+      # Step: 部署 Flink 作业到阿里云 Realtime Compute
+      # ==========================================
+      - name: Deploy Flink Job
+        env:
+          FLINK_ENDPOINT: ververica.${{ vars.FLINK_REGION }}.aliyuncs.com
+          FLINK_WORKSPACE: ${{ vars.FLINK_WORKSPACE }}
+          FLINK_NAMESPACE: ${{ vars.FLINK_NAMESPACE }}
+        run: |
+          echo "🚀 Deploying Flink job: ${{ env.JOB_NAME }}"
+          echo "  OSS JAR path: ${jar_oss_path}"
+          echo "  Entry class:  ${{ env.ENTRY_CLASS }}"
+          echo "  Workspace:    ${FLINK_WORKSPACE}"
+          echo "  Namespace:    ${FLINK_NAMESPACE}"
+
+          # 构建部署请求 body（使用 jq 确保 JSON 格式正确）
+          DEPLOY_BODY=$(jq -n \
+            --arg name "${{ env.JOB_NAME }}" \
+            --arg ns "${FLINK_NAMESPACE}" \
+            --arg jarUri "${jar_oss_path}" \
+            --arg entryClass "${{ env.ENTRY_CLASS }}" \
+            '{
+              metadata: { name: $name, namespace: $ns },
+              spec: {
+                state: "RUNNING",
+                template: {
+                  spec: {
+                    artifact: {
+                      kind: "JAR",
+                      jarUri: $jarUri,
+                      entryClass: $entryClass
+                    },
+                    parallelism: 1,
+                    resources: {
+                      jobmanager: { cpu: 0.5, memory: "1Gi" },
+                      taskmanager: { cpu: 0.5, memory: "1Gi" }
+                    }
+                  }
+                }
+              }
+            }')
+
+          echo "📄 Deployment config:"
+          echo "$DEPLOY_BODY" | jq .
+
+          # 检查是否已存在同名 deployment
+          echo "🔍 Checking for existing deployment..."
+          LIST_RESULT=$(aliyun ververica GET \
+            "/api/v2/namespaces/${FLINK_NAMESPACE}/deployments" \
+            --endpoint "${FLINK_ENDPOINT}" \
+            --header "workspace=${FLINK_WORKSPACE}" \
+            2>&1) || true
+
+          DEPLOY_ID=$(echo "$LIST_RESULT" | jq -r \
+            ".data.deployments[]? | select(.metadata.name==\"${{ env.JOB_NAME }}\") | .metadata.id" \
+            2>/dev/null) || DEPLOY_ID=""
+
+          if [ -n "$DEPLOY_ID" ] && [ "$DEPLOY_ID" != "null" ]; then
+            echo "📝 Updating existing deployment (ID: ${DEPLOY_ID})..."
+            RESULT=$(aliyun ververica PATCH \
+              "/api/v2/namespaces/${FLINK_NAMESPACE}/deployments/${DEPLOY_ID}" \
+              --endpoint "${FLINK_ENDPOINT}" \
+              --header "workspace=${FLINK_WORKSPACE}" \
+              --header "Content-Type=application/json" \
+              --body "$DEPLOY_BODY" 2>&1) || {
+                echo "❌ Failed to update deployment"
+                echo "$RESULT"
+                exit 1
+              }
+          else
+            echo "🆕 No existing deployment found, creating new one..."
+            RESULT=$(aliyun ververica POST \
+              "/api/v2/namespaces/${FLINK_NAMESPACE}/deployments" \
+              --endpoint "${FLINK_ENDPOINT}" \
+              --header "workspace=${FLINK_WORKSPACE}" \
+              --header "Content-Type=application/json" \
+              --body "$DEPLOY_BODY" 2>&1) || {
+                echo "❌ Failed to create deployment"
+                echo "$RESULT"
+                exit 1
+              }
+          fi
+
+          echo "$RESULT" | jq . 2>/dev/null || echo "$RESULT"
+          echo "✅ Flink job deployment completed!"
