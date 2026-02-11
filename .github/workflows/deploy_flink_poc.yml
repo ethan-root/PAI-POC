@@ -14,7 +14,9 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - 'poc/**'
+      - 'src/**'
+      - 'pom.xml'
+      - '.github/workflows/deploy_flink_poc.yml'
   workflow_dispatch:        # 允许手动触发（推荐首次用这个）
 
 env:
@@ -40,14 +42,13 @@ jobs:
           cache: maven
 
       - name: Build JAR
-        working-directory: ./poc
         run: mvn clean package -DskipTests
 
       - name: Upload JAR as artifact
         uses: actions/upload-artifact@v4
         with:
           name: flink-jar
-          path: ./poc/target/poc-flink-hello-world-*.jar
+          path: ./target/poc-flink-hello-world-*.jar
           retention-days: 3
 
   # ==========================================
