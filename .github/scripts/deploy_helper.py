@@ -71,6 +71,13 @@ def main():
     print("Deployment Config:")
     print(json_body)
 
+    
+    # Write JSON body to file for safe CLI passing
+    body_file = "deployment_body.json"
+    with open(body_file, "w") as f:
+        f.write(json_body)
+    print(f"Wrote deployment body to {body_file}")
+
     # 1. Check existing deployment
     check_url = f"/api/v2/namespaces/{flink_namespace}/deployments"
     check_args = [
@@ -120,6 +127,9 @@ def main():
             print("Failed to parse GET response")
 
     # 2. Update or Create
+    # Use @ syntax to read body from file
+    body_arg = f"@{body_file}"
+    
     if deployment_id:
         print(f"Found existing deployment ID: {deployment_id}. Updating...")
         update_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{deployment_id}"
@@ -128,7 +138,7 @@ def main():
             "--endpoint", flink_endpoint,
             "--header", f"workspace={flink_workspace}",
             "--header", "Content-Type=application/json",
-            "--body", json_body
+            "--body", body_arg
         ]
     else:
         print("No existing deployment found. Creating new...")
@@ -138,7 +148,7 @@ def main():
             "--endpoint", flink_endpoint,
             "--header", f"workspace={flink_workspace}",
             "--header", "Content-Type=application/json",
-            "--body", json_body
+            "--body", body_arg
         ]
 
     result_output = run_aliyun_command(deploy_args)
