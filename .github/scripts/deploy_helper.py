@@ -47,6 +47,7 @@ def main():
         "name": job_name,
         "namespace": flink_namespace,
         "executionMode": "STREAMING",
+        "engineVersion": "vvr-8.0.11-jdk11-flink-1.17",
         "artifact": {
             "kind": "JAR",
             "jarUri": jar_oss_path,
