@@ -46,6 +46,7 @@ def main():
     deployment_json = {
         "name": job_name,
         "namespace": flink_namespace,
+        "executionMode": "STREAMING",
         "artifact": {
             "kind": "JAR",
             "jarUri": jar_oss_path,
