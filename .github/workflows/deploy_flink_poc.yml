@@ -154,7 +154,8 @@ jobs:
           echo "  Namespace:    ${FLINK_NAMESPACE}"
 
           # 构建部署请求 body（使用 jq 确保 JSON 格式正确）
-          DEPLOY_BODY=$(jq -n \
+          # 使用 -c 选项生成压缩的 JSON (单行)，避免通过 CLI 传递时的换行符问题
+          jq -n -c \
             --arg name "${{ env.JOB_NAME }}" \
             --arg ns "${FLINK_NAMESPACE}" \
             --arg jarUri "${jar_oss_path}" \
@@ -180,10 +181,10 @@ jobs:
                   }
                 }
               }
-            }')
+            }' > deployment.json
 
-          echo "📄 Deployment config:"
-          echo "$DEPLOY_BODY" | jq .
+          echo "📄 Deployment config (compact):"
+          cat deployment.json
 
           # 检查是否已存在同名 deployment
           echo "🔍 Checking for existing deployment..."
@@ -204,11 +205,7 @@ jobs:
               --endpoint "${FLINK_ENDPOINT}" \
               --header "workspace=${FLINK_WORKSPACE}" \
               --header "Content-Type=application/json" \
-              --body "$DEPLOY_BODY" 2>&1) || {
-                echo "❌ Failed to update deployment"
-                echo "$RESULT"
-                exit 1
-              }
+              --body "$(cat deployment.json)" 2>&1) 
           else
             echo "🆕 No existing deployment found, creating new one..."
             RESULT=$(aliyun ververica POST \
@@ -216,12 +213,16 @@ jobs:
               --endpoint "${FLINK_ENDPOINT}" \
               --header "workspace=${FLINK_WORKSPACE}" \
               --header "Content-Type=application/json" \
-              --body "$DEPLOY_BODY" 2>&1) || {
-                echo "❌ Failed to create deployment"
-                echo "$RESULT"
-                exit 1
-              }
+              --body "$(cat deployment.json)" 2>&1)
+          fi
+          
+          echo "$RESULT" | jq . 2>/dev/null || echo "$RESULT"
+
+          # 检查 API 返回的 success 字段
+          IS_SUCCESS=$(echo "$RESULT" | jq -r '.success' 2>/dev/null)
+          if [ "$IS_SUCCESS" != "true" ]; then
+            echo "❌ Flink job deployment failed (API returned success: false)"
+            exit 1
           fi
 
-          echo "$RESULT" | jq . 2>/dev/null || echo "$RESULT"
           echo "✅ Flink job deployment completed!"
