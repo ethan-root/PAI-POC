@@ -4,7 +4,7 @@
 # 完全独立，不依赖任何 Kering 内部组件
 #
 # 前置条件:
-# 1. 在 GitHub Secrets 配置: ALIYUN_ACCESS_KEY_ID, ALIYUN_ACCESS_KEY_SECRET
+# 1. 在 GitHub Secrets 配置: FLINK_ACCESS_KEY, FLINK_ACCESS_SECRET
 # 2. 在 GitHub Secrets 配置: FLINK_OSS_BUCKET, FLINK_OSS_REGION, FLINK_WORKSPACE, FLINK_NAMESPACE, FLINK_REGION
 # 3. JAR 已上传到 OSS（本流水线会自动上传）
 
@@ -89,8 +89,8 @@ jobs:
             --profile default \
             --mode AK \
             --region ${{ secrets.FLINK_OSS_REGION }} \
-            --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
-            --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
+            --access-key-id "${{ secrets.FLINK_ACCESS_KEY }}" \
+            --access-key-secret "${{ secrets.FLINK_ACCESS_SECRET }}"
           echo "✅ CLI configured"
 
       - name: Validate required variables
