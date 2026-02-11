@@ -41,27 +41,24 @@ def main():
     print(f"Namespace: {flink_namespace}")
 
     # Construct Deployment JSON
+    # Construct Deployment JSON
+    # Based on the GET response, the API expects a flat structure, not K8s-style metadata/spec
     deployment_json = {
-        "metadata": {
-            "name": job_name,
-            "namespace": flink_namespace
+        "name": job_name,
+        "namespace": flink_namespace,
+        "artifact": {
+            "kind": "JAR",
+            "jarUri": jar_oss_path,
+            "entryClass": entry_class
         },
-        "spec": {
-            "state": "RUNNING",
-            "template": {
-                "spec": {
-                    "artifact": {
-                        "kind": "JAR",
-                        "jarUri": jar_oss_path,
-                        "entryClass": entry_class
-                    },
-                    "parallelism": 1,
-                    "resources": {
-                        "jobmanager": {"cpu": 0.5, "memory": "1Gi"},
-                        "taskmanager": {"cpu": 0.5, "memory": "1Gi"}
-                    }
-                }
-            }
+        "deploymentTarget": {
+            "mode": "PER_JOB",
+            "name": "default-queue"
+        },
+        "flinkConf": {
+            "parallelism.default": "1",
+            "jobmanager.memory.process.size": "1g",
+            "taskmanager.memory.process.size": "1g" 
         }
     }
 
