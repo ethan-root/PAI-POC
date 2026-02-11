@@ -42,8 +42,6 @@ def main():
 
     # Construct Deployment JSON
     deployment_json = {
-        "kind": "Deployment",
-        "apiVersion": "v1",
         "metadata": {
             "name": job_name,
             "namespace": flink_namespace
@@ -71,13 +69,6 @@ def main():
     print("Deployment Config:")
     print(json_body)
 
-    
-    # Write JSON body to file for safe CLI passing
-    body_file = "deployment_body.json"
-    with open(body_file, "w") as f:
-        f.write(json_body)
-    print(f"Wrote deployment body to {body_file}")
-
     # 1. Check existing deployment
     check_url = f"/api/v2/namespaces/{flink_namespace}/deployments"
     check_args = [
@@ -100,11 +91,9 @@ def main():
                 if isinstance(data, list):
                     deployments = data
                 elif isinstance(data, dict):
-                    # Handle { "data": { "deployments": [...] } } pattern
                     inner_data = data.get("data")
                     if isinstance(inner_data, dict):
                         deployments = inner_data.get("deployments", [])
-                    # Handle { "deployments": [...] } pattern
                     elif isinstance(inner_data, list):
                          deployments = inner_data
                     elif "deployments" in data:
@@ -113,7 +102,6 @@ def main():
                 print(f"Found {len(deployments)} deployments.")
                 
                 for dep in deployments:
-                    # Robustly access metadata
                     if not isinstance(dep, dict):
                         continue
                     metadata = dep.get("metadata", {})
@@ -127,9 +115,6 @@ def main():
             print("Failed to parse GET response")
 
     # 2. Update or Create
-    # Use @ syntax to read body from file
-    body_arg = f"@{body_file}"
-    
     if deployment_id:
         print(f"Found existing deployment ID: {deployment_id}. Updating...")
         update_url = f"/api/v2/namespaces/{flink_namespace}/deployments/{deployment_id}"
@@ -138,7 +123,7 @@ def main():
             "--endpoint", flink_endpoint,
             "--header", f"workspace={flink_workspace}",
             "--header", "Content-Type=application/json",
-            "--body", body_arg
+            "--body", json_body
         ]
     else:
         print("No existing deployment found. Creating new...")
@@ -148,7 +133,7 @@ def main():
             "--endpoint", flink_endpoint,
             "--header", f"workspace={flink_workspace}",
             "--header", "Content-Type=application/json",
-            "--body", body_arg
+            "--body", json_body
         ]
 
     result_output = run_aliyun_command(deploy_args)
