@@ -5,7 +5,7 @@
 #
 # 前置条件:
 # 1. 在 GitHub Secrets 配置: ALIYUN_ACCESS_KEY_ID, ALIYUN_ACCESS_KEY_SECRET
-# 2. 在 GitHub Variables 配置: OSS_BUCKET, OSS_REGION, FLINK_WORKSPACE, FLINK_NAMESPACE, FLINK_REGION
+# 2. 在 GitHub Secrets 配置: FLINK_OSS_BUCKET, FLINK_OSS_REGION, FLINK_WORKSPACE, FLINK_NAMESPACE, FLINK_REGION
 # 3. JAR 已上传到 OSS（本流水线会自动上传）
 
 name: POC - Deploy Flink to Aliyun
@@ -88,7 +88,7 @@ jobs:
           aliyun configure set \
             --profile default \
             --mode AK \
-            --region ${{ vars.OSS_REGION }} \
+            --region ${{ secrets.FLINK_OSS_REGION }} \
             --access-key-id "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
             --access-key-secret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
           echo "✅ CLI configured"
@@ -96,11 +96,11 @@ jobs:
       - name: Validate required variables
         run: |
           MISSING=""
-          [ -z "${{ vars.OSS_BUCKET }}" ] && MISSING="${MISSING} OSS_BUCKET"
-          [ -z "${{ vars.OSS_REGION }}" ] && MISSING="${MISSING} OSS_REGION"
-          [ -z "${{ vars.FLINK_WORKSPACE }}" ] && MISSING="${MISSING} FLINK_WORKSPACE"
-          [ -z "${{ vars.FLINK_NAMESPACE }}" ] && MISSING="${MISSING} FLINK_NAMESPACE"
-          [ -z "${{ vars.FLINK_REGION }}" ] && MISSING="${MISSING} FLINK_REGION"
+          [ -z "${{ secrets.FLINK_OSS_BUCKET }}" ] && MISSING="${MISSING} OSS_BUCKET"
+          [ -z "${{ secrets.FLINK_OSS_REGION }}" ] && MISSING="${MISSING} OSS_REGION"
+          [ -z "${{ secrets.FLINK_WORKSPACE }}" ] && MISSING="${MISSING} FLINK_WORKSPACE"
+          [ -z "${{ secrets.FLINK_NAMESPACE }}" ] && MISSING="${MISSING} FLINK_NAMESPACE"
+          [ -z "${{ secrets.FLINK_REGION }}" ] && MISSING="${MISSING} FLINK_REGION"
           if [ -n "$MISSING" ]; then
             echo "❌ Missing required GitHub Variables:${MISSING}"
             echo "   请在 GitHub 仓库 Settings → Secrets and variables → Actions → Variables 中配置"
@@ -117,10 +117,10 @@ jobs:
           JAR_FILENAME=$(basename $JAR_FILE)
           echo "Uploading $JAR_FILENAME to OSS..."
 
-          OSS_PATH="oss://${{ vars.OSS_BUCKET }}/artifacts/namespaces/${{ vars.FLINK_NAMESPACE }}/${JAR_FILENAME}"
+          OSS_PATH="oss://${{ secrets.FLINK_OSS_BUCKET }}/artifacts/namespaces/${{ secrets.FLINK_NAMESPACE }}/${JAR_FILENAME}"
           echo "OSS target: $OSS_PATH"
 
-          aliyun oss cp "$JAR_FILE" "$OSS_PATH" -f --region ${{ vars.OSS_REGION }}
+          aliyun oss cp "$JAR_FILE" "$OSS_PATH" -f --region ${{ secrets.FLINK_OSS_REGION }}
 
           echo "jar_oss_path=$OSS_PATH" >> $GITHUB_ENV
           echo "✅ JAR uploaded successfully"
@@ -131,9 +131,9 @@ jobs:
       # ==========================================
       - name: Deploy Flink Job
         env:
-          FLINK_ENDPOINT: ververica.${{ vars.FLINK_REGION }}.aliyuncs.com
-          FLINK_WORKSPACE: ${{ vars.FLINK_WORKSPACE }}
-          FLINK_NAMESPACE: ${{ vars.FLINK_NAMESPACE }}
+          FLINK_ENDPOINT: ververica.${{ secrets.FLINK_REGION }}.aliyuncs.com
+          FLINK_WORKSPACE: ${{ secrets.FLINK_WORKSPACE }}
+          FLINK_NAMESPACE: ${{ secrets.FLINK_NAMESPACE }}
         run: |
           echo "🚀 Deploying Flink job: ${{ env.JOB_NAME }}"
           echo "  OSS JAR path: ${jar_oss_path}"
