@@ -50,8 +50,10 @@ def main():
         "engineVersion": "vvr-8.0.11-jdk11-flink-1.17",
         "artifact": {
             "kind": "JAR",
-            "jarUri": jar_oss_path,
-            "entryClass": entry_class
+            "jarArtifact": {
+                "jarUri": jar_oss_path,
+                "entryClass": entry_class
+            }
         },
         "deploymentTarget": {
             "mode": "PER_JOB",
