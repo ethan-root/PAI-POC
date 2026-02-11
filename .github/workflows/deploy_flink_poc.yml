@@ -17,6 +17,7 @@ on:
       - 'src/**'
       - 'pom.xml'
       - '.github/workflows/deploy_flink_poc.yml'
+      - '.github/scripts/**'
   workflow_dispatch:        # 允许手动触发（推荐首次用这个）
 
 env:
