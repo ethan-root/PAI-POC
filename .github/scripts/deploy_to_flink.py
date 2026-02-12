@@ -109,17 +109,18 @@ class FlinkDeployer:
     )
 
     # 6. 配置 OpenTelemetry (OTEL) 监控代理
-    # 硬编码了 OTEL jar 包和配置文件的 OSS 路径
-    opentelemetry_javaagent = f"oss://{args.oss_bucket}/cicd/jars/opentelemetry-javaagent.jar"
-    opentelemetry_javaagent_config = f"oss://{args.oss_bucket}/cicd/jars/otel-agent-config.yaml"
-
+    # [FIX] 暂时禁用 OTEL，防止因 OSS 权限不足或文件缺失导致部署失败
+    # opentelemetry_javaagent = f"oss://{args.oss_bucket}/cicd/jars/opentelemetry-javaagent.jar"
+    # opentelemetry_javaagent_config = f"oss://{args.oss_bucket}/cicd/jars/otel-agent-config.yaml"
 
     # 将 OTEL 依赖添加到 additional_dependencies 列表中
-    if args.additional_dependencies:
-      args.additional_dependencies.append(opentelemetry_javaagent)
-      args.additional_dependencies.append(opentelemetry_javaagent_config)
-    else:
-      args.additional_dependencies = [opentelemetry_javaagent, opentelemetry_javaagent_config]
+    # if args.additional_dependencies:
+    #   if 'opentelemetry_javaagent' in locals(): args.additional_dependencies.append(opentelemetry_javaagent)
+    #   if 'opentelemetry_javaagent_config' in locals(): args.additional_dependencies.append(opentelemetry_javaagent_config)
+    # else:
+    #   args.additional_dependencies = [] 
+    #   if 'opentelemetry_javaagent' in locals(): args.additional_dependencies.append(opentelemetry_javaagent)
+    #   if 'opentelemetry_javaagent_config' in locals(): args.additional_dependencies.append(opentelemetry_javaagent_config)
 
     # 7. 构建 Jar Artifact 信息 (Main Class, Args, Dependencies)
     jar_artifact = JarArtifact(
@@ -147,9 +148,9 @@ class FlinkDeployer:
 
     # 9. 构造 JVM 参数，注入 OTEL Java Agent 配置
     # 分别为 TaskManager 和 JobManager 配置 OTEL 相关的环境变量
-    env_java_opts_taskmanager = f"-javaagent:/flink/usrlib/opentelemetry-javaagent.jar -Dotel.resource.attributes=service.name={args.job_name}-taskManager,deployment.environment={args.env} -Dotel.exporter.otlp.traces.endpoint=${{secret_values.ALICLOUD_OTEL_URL}}/adapt_${{secret_values.ALICLOUD_OTEL_TOKEN}}/api/otlp/traces -Dotel.logs.exporter=none -Dotel.metrics.exporter=none -Dotel.experimental.config.file=/flink/usrlib/otel-agent-config.yaml"
+    # env_java_opts_taskmanager = f"-javaagent:/flink/usrlib/opentelemetry-javaagent.jar -Dotel.resource.attributes=service.name={args.job_name}-taskManager,deployment.environment={args.env} -Dotel.exporter.otlp.traces.endpoint=${{secret_values.ALICLOUD_OTEL_URL}}/adapt_${{secret_values.ALICLOUD_OTEL_TOKEN}}/api/otlp/traces -Dotel.logs.exporter=none -Dotel.metrics.exporter=none -Dotel.experimental.config.file=/flink/usrlib/otel-agent-config.yaml"
 
-    env_java_opts_jobmanager = f"-javaagent:/flink/usrlib/opentelemetry-javaagent.jar -Dotel.resource.attributes=service.name={args.job_name}-jobManager,deployment.environment={args.env} -Dotel.exporter.otlp.traces.endpoint=${{secret_values.ALICLOUD_OTEL_URL}}/adapt_${{secret_values.ALICLOUD_OTEL_TOKEN}}/api/otlp/traces -Dotel.logs.exporter=none -Dotel.metrics.exporter=none -Dotel.experimental.config.file=/flink/usrlib/otel-agent-config.yaml"
+    # env_java_opts_jobmanager = f"-javaagent:/flink/usrlib/opentelemetry-javaagent.jar -Dotel.resource.attributes=service.name={args.job_name}-jobManager,deployment.environment={args.env} -Dotel.exporter.otlp.traces.endpoint=${{secret_values.ALICLOUD_OTEL_URL}}/adapt_${{secret_values.ALICLOUD_OTEL_TOKEN}}/api/otlp/traces -Dotel.logs.exporter=none -Dotel.metrics.exporter=none -Dotel.experimental.config.file=/flink/usrlib/otel-agent-config.yaml"
 
     # 10. Flink Configuration (flink-conf.yaml)
     # 包含 Checkpoint, Restart Strategy, State TTL 等关键配置
@@ -161,8 +162,8 @@ class FlinkDeployer:
       'execution.checkpointing.min-pause': '180s',
       'table.exec.state.ttl': '36 h', # State TTL 36小时
       'env.java.opts': '-Dconfig.disable-inline-comment=true',
-      'env.java.opts.taskmanager': env_java_opts_taskmanager,
-      'env.java.opts.jobmanager': env_java_opts_jobmanager
+      # 'env.java.opts.taskmanager': env_java_opts_taskmanager,
+      # 'env.java.opts.jobmanager': env_java_opts_jobmanager
     }
 
     # 11. 构建最终的 Deployment 对象
