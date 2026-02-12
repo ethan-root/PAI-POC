@@ -166,10 +166,16 @@ class FlinkDeployer:
       # 'env.java.opts.jobmanager': env_java_opts_jobmanager,
       
       # [FIX] 注入 OSS 访问凭证 (解决 AccessDenied 问题)
-      # 指导 Flink 使用传入的 AK/SK 访问 OSS，而不是默认的集群角色
+      # 1. 全局配置 (兜底)
       'fs.oss.accessKeyId': args.access_key,
       'fs.oss.accessKeySecret': args.access_secret,
-      'fs.oss.endpoint': f"oss-{args.region}.aliyuncs.com" 
+      'fs.oss.endpoint': f"oss-{args.region}.aliyuncs.com",
+      
+      # 2. VVR 8.0.6+ 推荐配置 (精确到Bucket)
+      # 参考文档: 配置Bucket鉴权信息
+      f'fs.oss.bucket.{args.oss_bucket}.accessKeyId': args.access_key,
+      f'fs.oss.bucket.{args.oss_bucket}.accessKeySecret': args.access_secret,
+      f'fs.oss.bucket.{args.oss_bucket}.endpoint': f"oss-{args.region}.aliyuncs.com"
     }
 
     # 11. 构建最终的 Deployment 对象
