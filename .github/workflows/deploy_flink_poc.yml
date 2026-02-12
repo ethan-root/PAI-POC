@@ -140,19 +140,17 @@ jobs:
       # ==========================================
       # Step: 部署 Flink 作业到阿里云 Realtime Compute
       # ==========================================
-      # ==========================================
-      # Step: 部署 Flink 作业到阿里云 Realtime Compute
-      # ==========================================
-      - name: Deploy Flink Job
-        env:
-          FLINK_ENDPOINT: ververica.${{ secrets.FLINK_REGION }}.aliyuncs.com
-          FLINK_WORKSPACE: ${{ secrets.FLINK_WORKSPACE }}
-          FLINK_NAMESPACE: ${{ secrets.FLINK_NAMESPACE }}
-          JOB_NAME: ${{ matrix.job_name }}
-          ENTRY_CLASS: ${{ matrix.entry_class }}
-        run: |
-          # 确保脚本有执行权限
-          chmod +x .github/scripts/deploy_helper.py
-          
-          echo "🚀 Starting Python Deployment Script..."
-          python3 .github/scripts/deploy_helper.py
+      - name: Deploy to Flink
+        uses: ./.github/actions/deploy-to-flink
+        with:
+          jobName: ${{ matrix.job_name }}
+          jarFilename: ${{ matrix.job_name }}-${{ env.JAR_VERSION }}.jar
+          accessKey: ${{ secrets.FLINK_ACCESS_KEY }}
+          accessSecret: ${{ secrets.FLINK_ACCESS_SECRET }}
+          ossBucket: ${{ secrets.FLINK_OSS_BUCKET }}
+          region: ${{ secrets.FLINK_REGION }}
+          workspace: ${{ secrets.FLINK_WORKSPACE }}
+          namespace: ${{ secrets.FLINK_NAMESPACE }}
+          environment: 'poc'
+          jobArgsFile: './src/main/deploy/job-args-dev.yml'
+          entryClass: ${{ matrix.entry_class }}

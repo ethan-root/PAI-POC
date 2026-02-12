@@ -1,0 +1,89 @@
+name: 'Deploy to Flink (Local)'
+description: 'Deploys a Flink job to Aliyun VVP using local python script'
+inputs:
+  jobName:
+    description: 'The name of the Flink job'
+    required: true
+  jarFilename:
+    description: 'The filename of the jar artifact'
+    required: true
+  accessKey:
+    description: 'Aliyun Access Key'
+    required: true
+  accessSecret:
+    description: 'Aliyun Access Secret'
+    required: true
+  ossBucket:
+    description: 'OSS Bucket Name'
+    required: true
+  region:
+    description: 'Aliyun Region'
+    required: false
+    default: 'cn-hangzhou'
+  workspace:
+    description: 'VVP Workspace ID'
+    required: true
+  namespace:
+    description: 'VVP Namespace'
+    required: true
+  engineVersion:
+    description: 'Flink Engine Version'
+    required: false
+    default: 'vvr-8.0.11-jdk11-flink-1.17'
+  environment:
+      description: 'Environment (e.g. dev, prod)'
+      required: false
+      default: 'dev'
+
+  jobArgsFile:
+    description: 'Path to job configuration YAML file'
+    required: false
+    default: ''
+
+  entryClass:
+    description: 'Entry class for the Flink job'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - name: Install Python dependencies
+      run: |
+        pip install alibabacloud_ververica20220718==1.10.0
+        pip install pyyaml
+      shell: bash
+
+    - name: Deploy to Flink
+      run: |
+        SCRIPT_PATH="${{ github.action_path }}/../../scripts/deploy_to_flink.py"
+        echo "Running deployment script from: $SCRIPT_PATH"
+        
+        # Build command with optional args
+        CMD="python \"$SCRIPT_PATH\" \
+          --env \"${{ inputs.environment }}\" \
+          --oss-bucket \"${{ inputs.ossBucket }}\" \
+          --access-key \"${{ inputs.accessKey }}\" \
+          --access-secret \"${{ inputs.accessSecret }}\" \
+          --workspace \"${{ inputs.workspace }}\" \
+          --namespace \"${{ inputs.namespace }}\" \
+          --job-name \"${{ inputs.jobName }}\" \
+          --jar-uri \"oss://${{ inputs.ossBucket }}/artifacts/namespaces/${{ inputs.namespace }}/jars/${{ inputs.jobName }}/${{ inputs.jarFilename }}\" \
+          --engine-version \"${{ inputs.engineVersion }}\" \
+          --region \"${{ inputs.region }}\""
+
+        if [ -n "${{ inputs.jobArgsFile }}" ]; then
+          CMD="$CMD --args-file \"${{ inputs.jobArgsFile }}\""
+        fi
+
+        if [ -n "${{ inputs.entryClass }}" ]; then
+          CMD="$CMD --entry-class \"${{ inputs.entryClass }}\""
+        fi
+
+        eval $CMD
+      shell: bash
