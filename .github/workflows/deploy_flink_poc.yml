@@ -154,3 +154,4 @@ jobs:
           environment: 'poc'
           jobArgsFile: './src/main/deploy/job-args-poc.yml'
           entryClass: ${{ matrix.entry_class }}
+          jarUri: ${{ env.jar_oss_path }}
