@@ -163,7 +163,13 @@ class FlinkDeployer:
       'table.exec.state.ttl': '36 h', # State TTL 36小时
       'env.java.opts': '-Dconfig.disable-inline-comment=true',
       # 'env.java.opts.taskmanager': env_java_opts_taskmanager,
-      # 'env.java.opts.jobmanager': env_java_opts_jobmanager
+      # 'env.java.opts.jobmanager': env_java_opts_jobmanager,
+      
+      # [FIX] 注入 OSS 访问凭证 (解决 AccessDenied 问题)
+      # 指导 Flink 使用传入的 AK/SK 访问 OSS，而不是默认的集群角色
+      'fs.oss.accessKeyId': args.access_key,
+      'fs.oss.accessKeySecret': args.access_secret,
+      'fs.oss.endpoint': f"oss-{args.region}.aliyuncs.com" 
     }
 
     # 11. 构建最终的 Deployment 对象
