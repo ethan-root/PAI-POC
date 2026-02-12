@@ -696,9 +696,9 @@ def main():
         
         # Initialize OSS Bucket
         auth = oss2.Auth(args.access_key, args.access_secret)
-        # Use internal endpoint if in same region, otherwise public
-        # Here we use public endpoint to ensure connectivity from control plane
-        endpoint = f"http://oss-{args.region}.aliyuncs.com" 
+        # Use internal endpoint for Flink Platform (Pyxis) 
+        # Flink Platform is inside Aliyun VPC, so internal endpoint is preferred for stability
+        endpoint = f"http://oss-{args.region}-internal.aliyuncs.com" 
         bucket = oss2.Bucket(auth, endpoint, bucket_name)
         
         # Generate signed URL valid for 1 hour (3600 seconds)
