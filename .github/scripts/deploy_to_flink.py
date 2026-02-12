@@ -678,6 +678,46 @@ def main():
 
   validate_required_args(args)
 
+  validate_required_args(args)
+
+  # [WORKAROUND] Generate Pre-signed URL for OSS Jar
+  # Since Flink Platform Role (System Role) might not have permission to read user's OSS Bucket,
+  # we generate a temporary pre-signed HTTP URL. Flink can download the JAR via this URL without auth.
+  if args.jar_uri and args.jar_uri.startswith("oss://"):
+    try:
+      import oss2
+      logger.info("Generating pre-signed URL for JAR to bypass platform permission issues...")
+      
+      # Parse oss://bucket/path/to/jar
+      path_parts = args.jar_uri[6:].split('/', 1)
+      if len(path_parts) == 2:
+        bucket_name = path_parts[0]
+        object_key = path_parts[1]
+        
+        # Initialize OSS Bucket
+        auth = oss2.Auth(args.access_key, args.access_secret)
+        # Use internal endpoint if in same region, otherwise public
+        # Here we use public endpoint to ensure connectivity from control plane
+        endpoint = f"http://oss-{args.region}.aliyuncs.com" 
+        bucket = oss2.Bucket(auth, endpoint, bucket_name)
+        
+        # Generate signed URL valid for 1 hour (3600 seconds)
+        signed_url = bucket.sign_url('GET', object_key, 3600)
+        
+        # Replace original oss:// URI with signed http:// URI
+        logger.info(f"Original JAR URI: {args.jar_uri}")
+        # Mask the signature in logs roughly
+        log_safe_url = signed_url.split('?')[0] + "?Signature=***"
+        logger.info(f"Generated Signed URL: {log_safe_url}")
+        
+        args.jar_uri = signed_url
+      else:
+        logger.warning(f"Failed to parse OSS URI: {args.jar_uri}")
+    except ImportError:
+      logger.error("oss2 module not found. Skipping pre-signed URL generation.")
+    except Exception as e:
+      logger.error(f"Failed to generate pre-signed URL: {e}")
+
   deployer = FlinkDeployer(args.access_key, args.access_secret, args.region)
 
   success = deployer.deploy(args)
