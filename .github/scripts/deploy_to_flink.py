@@ -672,6 +672,15 @@ def main():
 
   validate_required_args(args)
 
+  # [DEBUG] 打印 AK 信息以排查 STS 还是 RAM Key
+  if args.access_key:
+    # 打印前5位，用于快速判断是 LTAI 还是 STS
+    ak_prefix = args.access_key[:5]
+    logger.info(f"DEBUG: Access Key starts with: {ak_prefix}")
+    logger.info(f"DEBUG: Access Key length: {len(args.access_key)}")
+    if ak_prefix.startswith("STS"):
+      logger.warning("⚠️ Access Key looks like an STS Token. If you are using STS, actual deployment might fail without security_token!")
+
   deployer = FlinkDeployer(args.access_key, args.access_secret, args.region)
 
   success = deployer.deploy(args)
