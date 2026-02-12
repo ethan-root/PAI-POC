@@ -55,8 +55,7 @@ runs:
 
     - name: Install Python dependencies
       run: |
-        pip install alibabacloud_ververica20220718==1.10.0
-        pip install pyyaml
+        pip install alibabacloud_ververica20220718==1.10.0 oss2 pyyaml
       shell: bash
 
     - name: Deploy to Flink
