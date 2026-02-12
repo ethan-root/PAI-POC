@@ -152,5 +152,5 @@ jobs:
           workspace: ${{ secrets.FLINK_WORKSPACE }}
           namespace: ${{ secrets.FLINK_NAMESPACE }}
           environment: 'poc'
-          jobArgsFile: './src/main/deploy/job-args-dev.yml'
+          jobArgsFile: './src/main/deploy/job-args-poc.yml'
           entryClass: ${{ matrix.entry_class }}
